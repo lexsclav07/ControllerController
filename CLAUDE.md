@@ -11,6 +11,7 @@ Linux app (Fedora/GNOME Wayland) that lets an Xbox controller drive the PC from 
 .venv/bin/pytest tests/test_engine.py -k nav       # single test
 .venv/bin/python -W ignore tests/browser/run.py    # headless-Chrome smoke test of extension/*.js
 .venv/bin/python -m controllercontroller           # run the daemon (needs write access to /dev/uinput)
+python3 -m controllercontroller settings           # keybind window (GTK4/libadwaita; needs system python3-gobject, not in .venv)
 ```
 
 ## Architecture
@@ -18,6 +19,7 @@ Linux app (Fedora/GNOME Wayland) that lets an Xbox controller drive the PC from 
 - **Two modes**, chosen per event by `Engine.browser_mode` = extension connected AND a browser window focused AND not force-mouse (Guide). Browser mode sends `nav/select/back/osk` JSON to the extension instead of moving the pointer/clicking.
 - `bridge.py` is a WebSocket server on 127.0.0.1:8765 that only accepts `moz-extension://`/`chrome-extension://` origins (any web page can reach localhost, so keep this check). Protocol is documented at the top of the file.
 - Extension (`extension/`): `background.js` owns the socket and relays to the active tab; `osk.js` creates the closed shadow-DOM overlay (`window.__cc`) and the on-screen keyboard; `content.js` does spatial navigation (`collect` -> `pick`), the focus box, and "player mode" (when a video is fullscreen, directions go back to the daemon as real key presses because sites ignore synthetic keys).
+- Keybinds: `config.py` owns defaults, friendly labels (shared by the GTK settings window and checked against `BUTTONS`/`ACTIONS` in tests) and `save_bindings`, which writes only overrides so new defaults still reach existing users. The daemon's `config.watch` task reloads the dict **in place** when the file changes (the Engine holds the same dict).
 - Pad button/axis mapping uses Linux xpad codes (`BTN_NORTH` = X, `BTN_WEST` = Y). The Bluetooth Xbox pad reports the right stick as `ABS_Z/RZ` and triggers as `ABS_BRAKE/GAS`; `controller.axis_remap` normalises it to the xpad layout, so keep new axis logic in xpad terms.
 - `Bridge.send` delivers action messages (`nav/select/back/osk/search/mode`) only to the focused browser; the extension reports `typing` so the Engine does not tap stray keys (`f`, space) into a text field. The `help` action sends the live bindings to the extension, which draws the controls cheat sheet from them (`osk.js` `showHelp`), so never hard-code the list. Keys the extension may request are whitelisted in `engine.EXT_KEYS`.
 - On native links/buttons `content.select()` focuses the element and asks the daemon for a real Enter key (trusted user activation); only div-style targets get synthetic events.

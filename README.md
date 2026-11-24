@@ -37,7 +37,7 @@ Extension:
 | Guide | Force mouse mode on/off |
 | Right stick | Scroll |
 
-Only the button bindings are configurable: `~/.config/controllercontroller/config.toml` (created on first run).
+Only the button bindings are configurable. Open **ControllerController** from your app grid (or run `python -m controllercontroller settings`) to change what each button does; changes apply immediately, no restart. They are stored in `~/.config/controllercontroller/config.toml`, which only lists the buttons you changed, so new defaults still apply to the rest.
 
 ## Development
 ```bash

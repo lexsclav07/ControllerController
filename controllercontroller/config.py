@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tomllib
@@ -40,17 +41,36 @@ DEFAULT_BINDINGS: dict[str, str] = {
     "DPAD_RIGHT": "right",
 }
 
-DEFAULT_TOML = """\
-# ControllerController keybinds. Format: BUTTON = "action"
-# Buttons: {buttons}
-# Actions: {actions}
-[bindings]
-{lines}
-""".format(
-    buttons=", ".join(BUTTONS),
-    actions=", ".join(ACTIONS),
-    lines="\n".join(f'{b} = "{a}"' for b, a in DEFAULT_BINDINGS.items()),
-)
+# Friendly names, shared by the settings window.
+BUTTON_LABELS = {
+    "A": "A", "B": "B", "X": "X", "Y": "Y", "LB": "Left bumper (LB)", "RB": "Right bumper (RB)",
+    "LT": "Left trigger (LT)", "RT": "Right trigger (RT)", "START": "Menu", "SELECT": "View",
+    "GUIDE": "Xbox button", "L3": "Left stick click", "R3": "Right stick click",
+    "DPAD_UP": "D-pad up", "DPAD_DOWN": "D-pad down", "DPAD_LEFT": "D-pad left", "DPAD_RIGHT": "D-pad right",
+}
+ACTION_LABELS = {
+    "select": "Select / click", "back": "Back / close", "context": "Right-click",
+    "up": "Up", "down": "Down", "left": "Left", "right": "Right",
+    "seek_back": "Back 10 seconds", "seek_fwd": "Forward 10 seconds",
+    "vol_up": "Volume up", "vol_down": "Volume down", "play_pause": "Play / pause",
+    "fullscreen": "Fullscreen", "search": "Search", "osk": "On-screen keyboard", "help": "Show controls",
+    "toggle_mode": "Mouse mode on / off", "tab_prev": "Previous tab", "tab_next": "Next tab",
+    "none": "Do nothing",
+}
+
+
+def render_toml(overrides: dict[str, str]) -> str:
+    """Config text: only the bindings that differ from the defaults, so new defaults still apply."""
+    lines = [
+        "# ControllerController keybinds. Easiest to change in the ControllerController settings window.",
+        '# Format: BUTTON = "action". Anything not listed here uses the default.',
+        f"# Buttons: {', '.join(BUTTONS)}",
+        f"# Actions: {', '.join(ACTIONS)}",
+        "# Defaults: " + ", ".join(f"{b}={a}" for b, a in DEFAULT_BINDINGS.items()),
+        "[bindings]",
+    ]
+    lines += [f'{b} = "{a}"' for b, a in overrides.items()]
+    return "\n".join(lines) + "\n"
 
 
 def config_path() -> Path:
@@ -65,7 +85,7 @@ def load_bindings(path: Path | None = None) -> dict[str, str]:
     if not path.exists():
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(DEFAULT_TOML)
+            path.write_text(render_toml({}))
         except OSError as exc:
             log.warning("could not write default config: %s", exc)
         return bindings
@@ -82,3 +102,35 @@ def load_bindings(path: Path | None = None) -> dict[str, str]:
         else:
             bindings[button] = action
     return bindings
+
+
+def save_bindings(bindings: dict[str, str], path: Path | None = None) -> None:
+    """Write bindings atomically (the daemon reloads the file when it changes)."""
+    path = path or config_path()
+    overrides = {b: a for b, a in bindings.items() if DEFAULT_BINDINGS.get(b) != a}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(render_toml(overrides))
+    os.replace(tmp, path)
+
+
+async def watch(bindings: dict[str, str], path: Path | None = None, interval: float = 1.0) -> None:
+    """Reload keybinds into `bindings` (in place) whenever the config file changes."""
+    path = path or config_path()
+
+    def stamp() -> int:
+        try:
+            return path.stat().st_mtime_ns
+        except OSError:
+            return 0
+
+    last = stamp()
+    while True:
+        await asyncio.sleep(interval)
+        now = stamp()
+        if now != last:
+            last = now
+            fresh = load_bindings(path)
+            bindings.clear()
+            bindings.update(fresh)
+            log.info("keybinds reloaded")

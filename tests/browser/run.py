@@ -115,6 +115,17 @@ try:
     js("window.__sent.length=0; Object.defineProperty(document,'fullscreenElement',{get:()=>document.body,configurable:true})")
     send(type="nav", dir="left"); send(type="select")
     check("player mode forwards keys", js("window.__sent.filter(m=>m.type==='key').map(m=>m.key)"), ["left", "space"])
+    js("document.dispatchEvent(new Event('fullscreenchange'))"); time.sleep(0.3)
+    check("no focus box in fullscreen player mode", js("window.__cc.boxEl.style.display"), "none")
+    js("delete document.fullscreenElement; document.dispatchEvent(new Event('fullscreenchange'))"); time.sleep(0.4)
+    check("box returns after leaving fullscreen", js("window.__cc.boxEl.style.display"), "block")
+    # YouTube-style auto-hiding controls: faded out (opacity 0) -> box must not hover over nothing
+    js("document.getElementById('a5').parentElement.style.opacity='0'"); time.sleep(0.4)
+    send(type="nav", dir="up")   # land somewhere in the faded grid
+    time.sleep(0.4)
+    check("box hidden over invisible element", js("window.__cc.boxEl.style.display"), "none")
+    js("document.getElementById('a5').parentElement.style.opacity='1'"); time.sleep(0.4)
+    check("box back when it fades in", js("window.__cc.boxEl.style.display"), "block")
     ws.close()
     print("\nFAILED:" if fails else "\nALL PASSED", fails or "")
     sys.exit(1 if fails else 0)

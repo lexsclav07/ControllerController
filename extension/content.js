@@ -206,10 +206,26 @@
   }
   CC.setCursor = setCursor;
 
+  // True when the box would be pointing at something the user can't see (faded-out player controls,
+  // an element a page overlay now covers) or when the controller is steering a fullscreen video.
+  function boxHidden() {
+    if (document.fullscreenElement && !osk.isOpen()) return true;   // player mode: keys go to the video
+    for (let n = cur, i = 0; n && n !== document.documentElement && i < 12; n = n.parentElement || n.getRootNode()?.host, i++) {
+      const st = getComputedStyle(n);
+      if (st.opacity === "0" || st.visibility === "hidden" || st.display === "none") return true;
+    }
+    const r = cur.getBoundingClientRect();
+    const t = document.elementFromPoint(
+      Math.min(innerWidth - 1, Math.max(0, r.left + r.width / 2)),
+      Math.min(innerHeight - 1, Math.max(0, r.top + r.height / 2)));
+    return !!t && !related(cur, t) && r.top >= 0 && r.bottom <= innerHeight;
+  }
+
   let tracking = false;
   function track() {
     if (tracking) return;
     tracking = true;
+    let n = 0;
     const frame = () => {
       if (!cur || !cur.isConnected || paused || !document.hasFocus() || osk.keys().includes(cur)) {
         if (!osk.keys().includes(cur)) box.style.display = "none";
@@ -217,12 +233,18 @@
         return;
       }
       const r = cur.getBoundingClientRect();
-      if (!r.width || !r.height) { box.style.display = "none"; }   // element hidden by the page
+      // The visibility check walks ancestors, so run it a few times a second, not every frame.
+      if (n++ % 6 === 0) box.dataset.hide = boxHidden() ? "1" : "";
+      if (!r.width || !r.height || box.dataset.hide) { box.style.display = "none"; }
       else { place(); box.style.display = "block"; }
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
   }
+  document.addEventListener("fullscreenchange", () => {
+    if (document.fullscreenElement) box.style.display = "none";
+    else if (cur && !paused) track();
+  });
 
   // ---- actions ----
   const playerMode = () => !!document.fullscreenElement && !osk.isOpen();

@@ -274,3 +274,41 @@ def test_help_sends_live_bindings_to_extension_and_is_silent_in_mouse_mode():
     eng, out, bridge = make_browser(active=False)
     eng.button("X", True)
     assert bridge.sent == [] and out.events == []
+
+
+# ---- config save / hot reload -----------------------------------------
+
+def test_save_writes_only_overrides_and_roundtrips(tmp_path):
+    p = tmp_path / "c.toml"
+    b = dict(config.DEFAULT_BINDINGS)
+    b["X"] = "osk"
+    b["R3"] = "none"
+    config.save_bindings(b, p)
+    text = p.read_text()
+    assert 'X = "osk"' in text and 'R3 = "none"' in text and 'A = "select"' not in text
+    assert config.load_bindings(p) == b
+    config.save_bindings(dict(config.DEFAULT_BINDINGS), p)
+    assert "[bindings]\n" in p.read_text() and config.load_bindings(p) == config.DEFAULT_BINDINGS
+
+
+def test_every_button_and_action_has_a_label():
+    assert set(config.BUTTON_LABELS) == set(config.BUTTONS)
+    assert set(config.ACTION_LABELS) == set(config.ACTIONS)
+
+
+def test_daemon_reloads_keybinds_in_place_when_file_changes(tmp_path):
+    import asyncio
+    p = tmp_path / "c.toml"
+    bindings = config.load_bindings(p)
+
+    async def scenario():
+        task = asyncio.create_task(config.watch(bindings, p, interval=0.05))
+        await asyncio.sleep(0.15)
+        cfg = dict(config.DEFAULT_BINDINGS); cfg["A"] = "back"
+        config.save_bindings(cfg, p)
+        await asyncio.sleep(0.3)
+        task.cancel()
+
+    same_dict = bindings
+    asyncio.run(scenario())
+    assert bindings is same_dict and bindings["A"] == "back"

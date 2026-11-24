@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ControllerController
+Comment=Change what each controller button does
+Exec=@PYTHON@ -m controllercontroller settings
+Icon=input-gaming
+Terminal=false
+Categories=Settings;GTK;
+StartupNotify=true
+StartupWMClass=io.github.lexsclav07.ControllerController
