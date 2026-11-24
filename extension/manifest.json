@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "ControllerController",
+  "version": "0.1.0",
+  "description": "Console-style controller navigation, focus box and on-screen keyboard for the ControllerController daemon.",
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "permissions": ["alarms"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["osk.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": { "id": "controllercontroller@lexsclav07", "strict_min_version": "121.0" }
+  }
+}

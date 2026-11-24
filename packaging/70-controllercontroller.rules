@@ -1,0 +1,2 @@
+# Lets logged-in users create virtual input devices. Only needed if /dev/uinput is not already writable.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

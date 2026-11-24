@@ -123,3 +123,78 @@ def test_default_config_written_on_first_run(tmp_path):
     p = tmp_path / "sub" / "c.toml"
     config.load_bindings(p)
     assert config.load_bindings(p) == config.DEFAULT_BINDINGS and p.exists()
+
+
+class FakeBridge:
+    def __init__(self, active=True):
+        self.active, self.sent = active, []
+
+    def send(self, msg):
+        self.sent.append(msg)
+
+
+def make_browser(active=True):
+    out, media, bridge = FakeOut(), FakeMedia(), FakeBridge(active)
+    eng = Engine(out, dict(config.DEFAULT_BINDINGS), media, bg=lambda f, *a: f(*a), bridge=bridge)
+    return eng, out, bridge
+
+
+def test_browser_mode_routes_select_back_osk_to_extension():
+    eng, out, bridge = make_browser()
+    for b in ("A", "B", "X"):
+        eng.button(b, True)
+        eng.button(b, False)
+    assert [m["type"] for m in bridge.sent] == ["select", "back", "osk"]
+    assert out.events == []
+
+
+def test_browser_mode_stick_navigates_instead_of_moving_pointer():
+    eng, out, bridge = make_browser()
+    eng.abs_event(e.ABS_X, 32767, -32768, 32767)
+    eng.tick(1 / 120)
+    assert bridge.sent == [{"type": "nav", "dir": "right"}]
+    assert not [ev for ev in out.events if ev[0] == "move"]
+
+
+def test_nav_repeats_while_held_then_stops():
+    eng, _, bridge = make_browser()
+    eng.abs_event(e.ABS_Y, -32768, -32768, 32767)   # push up
+    for _ in range(120):                              # 1 second
+        eng.tick(1 / 120)
+    assert len(bridge.sent) in (5, 6)   # at 0s, 0.4s, then every 0.15s
+    assert all(m == {"type": "nav", "dir": "up"} for m in bridge.sent)
+    eng.abs_event(e.ABS_Y, 0, -32768, 32767)
+    n = len(bridge.sent)
+    eng.tick(1.0)
+    assert len(bridge.sent) == n
+
+
+def test_dpad_navigates_once_per_press_in_browser_mode():
+    eng, out, bridge = make_browser()
+    eng.abs_event(e.ABS_HAT0X, 1, -1, 1)
+    eng.tick(1 / 120)
+    eng.abs_event(e.ABS_HAT0X, 0, -1, 1)
+    eng.tick(1 / 120)
+    assert bridge.sent == [{"type": "nav", "dir": "right"}]
+    assert out.events == []
+
+
+def test_inactive_browser_falls_back_to_mouse_mode():
+    eng, out, bridge = make_browser(active=False)
+    eng.button("A", True)
+    assert out.events == [("key", e.BTN_LEFT, True)] and bridge.sent == []
+
+
+def test_guide_forces_mouse_mode_and_back():
+    eng, out, bridge = make_browser()
+    eng.button("GUIDE", True)
+    assert eng.force_mouse and not eng.browser_mode
+    eng.button("GUIDE", True)
+    assert eng.browser_mode
+
+
+def test_extension_keys_are_whitelisted():
+    eng, out, _ = make_browser()
+    eng.ext_key("left")
+    eng.ext_key("rm -rf")
+    assert out.events == [("tap", e.KEY_LEFT)]

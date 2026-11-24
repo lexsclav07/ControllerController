@@ -1,0 +1,10 @@
+[Unit]
+Description=ControllerController - Xbox controller to keyboard/mouse/browser bridge
+
+[Service]
+ExecStart=%h/.local/share/controllercontroller/venv/bin/python -m controllercontroller
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

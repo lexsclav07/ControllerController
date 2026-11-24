@@ -1,0 +1,13 @@
+<!doctype html><meta charset=utf-8><title>cc test</title>
+<style>body{margin:0;font:16px sans-serif}.g{display:grid;grid-template-columns:repeat(3,200px);gap:40px;padding:40px}
+.g a,.g button{display:block;height:80px;background:#ddd}.far{margin-top:1800px}</style>
+<div class=g>
+ <a id=a1 href="#a1">1</a><a id=a2 href="#a2">2</a><a id=a3 href="#a3">3</a>
+ <button id=b1>4</button><a id=a5 href="#a5">5</a><button id=b3>6</button>
+ <a id=a7 href="#a7">7</a><a id=a8 href="#a8">8</a><a id=a9 href="#a9">9</a>
+</div>
+<form id=f onsubmit="event.preventDefault();window.submitted=document.getElementById('q').value">
+ <input id=q type=search style="margin:0 40px;width:300px;height:30px"></form>
+<div id=hidden style="position:fixed;left:0;top:0;width:100px;height:100px;display:none"><a id=hid href="#">x</a></div>
+<a class=far id=far href="#far" style="display:block;height:60px;background:#cde">far</a>
+<script>window.clicked=[];document.addEventListener('click',e=>{window.clicked.push(e.target.id)},true)</script>
