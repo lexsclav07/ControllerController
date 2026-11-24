@@ -36,6 +36,7 @@ NAV_REPEAT = 0.15
 # Keys the browser extension may ask us to press (e.g. arrows for in-player seeking).
 EXT_KEYS = {"up": e.KEY_UP, "down": e.KEY_DOWN, "left": e.KEY_LEFT, "right": e.KEY_RIGHT,
             "space": e.KEY_SPACE, "enter": e.KEY_ENTER, "slash": e.KEY_SLASH}
+TAB_KEYS = {"tab_prev": e.KEY_PAGEUP, "tab_next": e.KEY_PAGEDOWN}
 # Actions that fire once on press.
 TAPPED = {"back": e.BTN_SIDE, "fullscreen": e.KEY_F, "search": e.KEY_SLASH}
 
@@ -122,6 +123,8 @@ class Engine:
             return
         if action in TAPPED:
             self.out.tap(TAPPED[action])
+        elif action in TAB_KEYS:   # Ctrl+PageUp/PageDown switches tabs in Firefox and Chrome
+            self.out.combo(e.KEY_LEFTCTRL, TAB_KEYS[action])
         elif action == "play_pause":
             self.bg(self._media_or_key, self.media.play_pause, e.KEY_SPACE)
         elif action == "seek_back":

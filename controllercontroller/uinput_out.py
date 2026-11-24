@@ -8,7 +8,7 @@ from evdev import ecodes as e
 KEYS = [
     e.KEY_UP, e.KEY_DOWN, e.KEY_LEFT, e.KEY_RIGHT, e.KEY_F, e.KEY_SLASH,
     e.KEY_ESC, e.KEY_ENTER, e.KEY_VOLUMEUP, e.KEY_VOLUMEDOWN, e.KEY_MUTE,
-    e.KEY_PLAYPAUSE, e.KEY_SPACE,
+    e.KEY_PLAYPAUSE, e.KEY_SPACE, e.KEY_LEFTCTRL, e.KEY_PAGEUP, e.KEY_PAGEDOWN,
     e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE, e.BTN_SIDE,
 ]
 REL = [e.REL_X, e.REL_Y, e.REL_WHEEL, e.REL_HWHEEL, e.REL_WHEEL_HI_RES, e.REL_HWHEEL_HI_RES]
@@ -51,6 +51,12 @@ class Output:
     def tap(self, code: int) -> None:
         self.key(code, True)
         self.key(code, False)
+
+    def combo(self, modifier: int, code: int) -> None:
+        """Tap `code` while `modifier` is held (e.g. Ctrl+PageDown)."""
+        self.key(modifier, True)
+        self.tap(code)
+        self.key(modifier, False)
 
     def close(self) -> None:
         self.ui.close()

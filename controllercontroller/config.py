@@ -17,7 +17,7 @@ BUTTONS = (
 ACTIONS = (
     "select", "context", "back", "up", "down", "left", "right",
     "seek_back", "seek_fwd", "vol_up", "vol_down", "play_pause",
-    "fullscreen", "search", "osk", "toggle_mode", "none",
+    "fullscreen", "search", "osk", "toggle_mode", "tab_prev", "tab_next", "none",
 )
 
 DEFAULT_BINDINGS: dict[str, str] = {
@@ -32,6 +32,8 @@ DEFAULT_BINDINGS: dict[str, str] = {
     "START": "play_pause",
     "SELECT": "fullscreen",
     "GUIDE": "toggle_mode",
+    "L3": "tab_prev",
+    "R3": "tab_next",
     "DPAD_UP": "up",
     "DPAD_DOWN": "down",
     "DPAD_LEFT": "left",

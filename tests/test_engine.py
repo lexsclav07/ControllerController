@@ -14,6 +14,9 @@ class FakeOut:
     def tap(self, code):
         self.events.append(("tap", code))
 
+    def combo(self, modifier, code):
+        self.events.append(("combo", modifier, code))
+
     def move(self, dx, dy):
         if dx or dy:
             self.events.append(("move", dx, dy))
@@ -251,3 +254,11 @@ def test_extension_may_press_enter_and_slash():
     eng, out, _ = make_browser()
     eng.ext_key("enter"); eng.ext_key("slash")
     assert out.events == [("tap", e.KEY_ENTER), ("tap", e.KEY_SLASH)]
+
+
+def test_stick_clicks_switch_tabs_in_both_modes():
+    for eng, out in (make()[:2], make_browser()[:2]):
+        eng.button("R3", True); eng.button("R3", False)
+        eng.button("L3", True)
+        assert out.events == [("combo", e.KEY_LEFTCTRL, e.KEY_PAGEDOWN),
+                              ("combo", e.KEY_LEFTCTRL, e.KEY_PAGEUP)]

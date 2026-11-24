@@ -33,6 +33,7 @@ Extension:
 | LB / RB | Seek -10s / +10s |
 | LT / RT | Volume down / up |
 | Start / Select | Play-pause / Fullscreen |
+| L3 / R3 (click sticks) | Previous / next browser tab |
 | Guide | Force mouse mode on/off |
 | Right stick | Scroll |
 
