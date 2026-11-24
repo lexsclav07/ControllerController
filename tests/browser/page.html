@@ -8,6 +8,8 @@
 </div>
 <form id=f onsubmit="event.preventDefault();window.submitted=document.getElementById('q').value">
  <input id=q type=search style="margin:0 40px;width:300px;height:30px"></form>
+<div id=dv role=button tabindex=0 style="margin:20px 40px;width:200px;height:50px;background:#fc9">custom</div>
+<dialog id=dlg><button id=dbtn>ok</button></dialog>
 <div id=hidden style="position:fixed;left:0;top:0;width:100px;height:100px;display:none"><a id=hid href="#">x</a></div>
 <a class=far id=far href="#far" style="display:block;height:60px;background:#cde">far</a>
 <script>window.clicked=[];document.addEventListener('click',e=>{window.clicked.push(e.target.id)},true)</script>

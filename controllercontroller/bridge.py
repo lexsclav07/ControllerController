@@ -1,8 +1,10 @@
 """Local WebSocket link to the browser extension.
 
-daemon -> extension: {"type": "nav"|"select"|"back"|"osk"|"report"|"ping", ...}
+daemon -> extension: {"type": "nav", "dir": ...} | select | back | osk | search | {"type": "mode", "mouse": bool}
+                     (delivered only to the focused browser), plus "report" and "ping" (to everyone)
 extension -> daemon: {"type": "active", "value": bool}   browser window focused
-                     {"type": "key", "key": "up|down|left|right|space"}
+                     {"type": "typing", "value": bool}   a text field has focus
+                     {"type": "key", "key": "up|down|left|right|space|enter|slash"}
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ from websockets.asyncio.server import ServerConnection, serve
 log = logging.getLogger(__name__)
 HOST, PORT = "127.0.0.1", 8765
 ALLOWED_ORIGIN_PREFIXES = ("moz-extension://", "chrome-extension://")
+# Messages that act on the page; they must only reach the browser the user is looking at.
+ACTION_TYPES = {"nav", "select", "back", "osk", "search", "mode"}
 
 
 class Bridge:
@@ -25,16 +29,24 @@ class Bridge:
         self.host, self.port = host, port
         self.on_key = on_key or (lambda _k: None)
         self._clients: dict[ServerConnection, bool] = {}   # connection -> browser focused
+        self._typing: dict[ServerConnection, bool] = {}    # connection -> text field focused
 
     @property
     def active(self) -> bool:
         """True when a browser window with the extension is focused."""
         return any(self._clients.values())
 
+    @property
+    def typing(self) -> bool:
+        """True when the focused browser has a text field focused (so stray keys would be typed)."""
+        return any(self._typing.get(ws) for ws, focused in self._clients.items() if focused)
+
     def send(self, msg: dict) -> None:
         data = json.dumps(msg)
-        for ws in list(self._clients):
-            asyncio.ensure_future(self._safe_send(ws, data))
+        action = msg.get("type") in ACTION_TYPES
+        for ws, focused in list(self._clients.items()):
+            if focused or not action:
+                asyncio.ensure_future(self._safe_send(ws, data))
 
     @staticmethod
     async def _safe_send(ws: ServerConnection, data: str) -> None:
@@ -57,6 +69,7 @@ class Bridge:
                 self._handle(ws, raw)
         finally:
             self._clients.pop(ws, None)
+            self._typing.pop(ws, None)
             log.info("extension disconnected")
 
     def _handle(self, ws: ServerConnection, raw: str | bytes) -> None:
@@ -67,6 +80,8 @@ class Bridge:
             return
         if kind == "active":
             self._clients[ws] = bool(msg.get("value"))
+        elif kind == "typing":
+            self._typing[ws] = bool(msg.get("value"))
         elif kind == "key" and isinstance(msg.get("key"), str):
             self.on_key(msg["key"])
 
@@ -74,4 +89,4 @@ class Bridge:
         async with serve(self._handler, self.host, self.port):
             while True:
                 await asyncio.sleep(20)
-                self.send({"type": "ping"})   # keeps the extension's service worker awake
+                self.send({"type": "ping"})   # keeps Chrome's service worker awake (Firefox relies on the alarm + reconnect)

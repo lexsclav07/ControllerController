@@ -7,8 +7,11 @@
     "service_worker": "background.js",
     "scripts": ["background.js"]
   },
-  "permissions": ["alarms"],
+  "permissions": ["alarms", "scripting"],
   "host_permissions": ["<all_urls>"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
@@ -17,6 +20,6 @@
     }
   ],
   "browser_specific_settings": {
-    "gecko": { "id": "controllercontroller@lexsclav07", "strict_min_version": "121.0" }
+    "gecko": { "id": "controllercontroller@lexsclav07", "strict_min_version": "125.0" }
   }
 }

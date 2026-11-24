@@ -1,15 +1,16 @@
-// Console-style spatial navigation: focus box, selection, back, player-mode keys.
+// Console-style spatial navigation: focus box, selection, back, search, player-mode keys.
 (() => {
   const CC = window.__cc;
-  if (!CC || window.top !== window) return;
+  if (!CC || window.top !== window || CC.contentLoaded) return;
+  CC.contentLoaded = true;
   const api = globalThis.browser ?? globalThis.chrome;
   const osk = CC.osk;
   const box = CC.boxEl;
 
   const SELECTABLE = [
-    "a[href]", "button", "input:not([type=hidden])", "select", "textarea", "summary",
-    "[role=button]", "[role=link]", "[role=menuitem]", "[role=tab]", "[role=checkbox]",
-    "[role=switch]", "[role=option]", "[role=radio]", "[role=combobox]",
+    "a[href]", "button", "input:not([type=hidden])", "select", "textarea", "summary", "iframe",
+    "[role=button]", "[role=link]", "[role=menuitem]", "[role=menuitemcheckbox]", "[role=menuitemradio]",
+    "[role=tab]", "[role=checkbox]", "[role=switch]", "[role=option]", "[role=radio]", "[role=combobox]",
     "[contenteditable='']", "[contenteditable=true]", "[tabindex]:not([tabindex='-1'])", "[onclick]",
   ].join(",");
   const SKIP_BUTTONS = [
@@ -17,25 +18,44 @@
     "[data-uia=player-skip-intro]", "[data-uia=player-skip-recap]",
     "[data-uia=next-episode-seamless-button]", "[data-uia=next-episode-seamless-button-draining]",
   ].join(",");
+  const SEARCH_BOXES = [
+    "input[type=search]", "input[name=search_query]", "input[name=q]", "input[name=query]",
+    "input[name=search]", "[role=searchbox]", "input[role=combobox][aria-label*=earch i]",
+  ].join(",");
+  // Native controls where a real Enter/Space key gives the page a trusted user activation.
+  const ENTER_TARGETS = "a[href],button,summary,input[type=button],input[type=submit],input[type=reset],input[type=image]";
+  const SPACE_TARGETS = "input[type=checkbox],input[type=radio]";
 
   let cur = null;              // element with the focus box
   let pageCur = null;          // page element to return to when the OSK closes
   let controllerMode = false;  // true once the controller has driven this page
+  let paused = false;          // true while the daemon is in forced mouse mode
   let lastScrollRetry = 0;
+  let lastEscape = { el: null, at: 0 };
 
-  // ---- window focus reporting (tells the daemon when to use browser mode) ----
-  const reportFocus = () => {
-    try {
-      api.runtime.sendMessage({
-        type: "focus",
-        value: document.hasFocus() && document.visibilityState === "visible",
-      }).catch(() => {});
-    } catch {}
+  const safe = (fn) => { try { return fn(); } catch { return undefined; } };
+  const send = (msg) => safe(() => api.runtime.sendMessage(msg).catch(() => {}));
+  const isVisible = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden";
   };
-  addEventListener("focus", reportFocus);
+
+  // ---- window focus + typing reporting (tells the daemon when to use browser mode) ----
+  const reportFocus = () => send({
+    type: "focus",
+    value: document.hasFocus() && document.visibilityState === "visible",
+  });
+  addEventListener("focus", () => { reportFocus(); if (cur && !paused) track(); });
   addEventListener("blur", () => setTimeout(reportFocus, 0));
-  document.addEventListener("visibilitychange", reportFocus);
+  addEventListener("pageshow", reportFocus);   // back/forward cache restores
+  document.addEventListener("visibilitychange", () => { reportFocus(); if (cur && !paused) track(); });
   addEventListener("mousemove", (e) => { if (e.isTrusted) controllerMode = false; }, true);
+  document.addEventListener("focusin", (e) => {
+    if (osk.isEditable(e.target)) send({ type: "typing", value: true });
+  }, true);
+  document.addEventListener("focusout", (e) => {
+    if (osk.isEditable(e.target) && !osk.isEditable(e.relatedTarget)) send({ type: "typing", value: false });
+  }, true);
   reportFocus();
 
   // ---- candidate collection ----
@@ -45,13 +65,32 @@
     return false;
   };
 
+  function deepAll(root, out) {
+    out.push(...root.querySelectorAll(SELECTABLE));
+    for (const el of root.querySelectorAll("*")) if (el.shadowRoot) deepAll(el.shadowRoot, out);
+    return out;
+  }
+
+  const tiny = (el) => {
+    const r = el.getBoundingClientRect();
+    const st = getComputedStyle(el);
+    return r.width < 6 || r.height < 6 || st.opacity === "0" || st.visibility === "hidden";
+  };
+
   function collect() {
     const vw = innerWidth, vh = innerHeight;
+    const all = deepAll(document, []);
+    // Custom checkboxes/toggles hide the real control and make its <label> the click target.
+    for (const l of document.querySelectorAll("label[for]")) {
+      const c = document.getElementById(l.htmlFor);
+      if (c && tiny(c)) all.push(l);
+    }
     const out = [];
-    for (const el of document.querySelectorAll(SELECTABLE)) {
-      if (el.disabled || el.closest("[inert],[aria-hidden=true]") || el.type === "hidden") continue;
+    for (const el of all) {
+      if (el.disabled || el.closest("[inert],[aria-hidden=true]")) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 6 || r.height < 6) continue;
+      if (el.tagName === "IFRAME" && (r.width < 200 || r.height < 120)) continue;
       if (r.bottom < -vh * 0.3 || r.top > vh * 1.3 || r.right < -vw * 0.3 || r.left > vw * 1.3) continue;
       const st = getComputedStyle(el);
       if (st.visibility === "hidden" || st.pointerEvents === "none" || st.opacity === "0") continue;
@@ -119,26 +158,50 @@
   function fire(el, types, init) {
     for (const t of types) {
       const Ctor = t.startsWith("pointer") ? PointerEvent : MouseEvent;
-      el.dispatchEvent(new Ctor(t, { bubbles: !/enter|leave/.test(t), composed: true, ...init }));
+      el.dispatchEvent(new Ctor(t, {
+        bubbles: !/enter|leave/.test(t), cancelable: !/enter|leave/.test(t), composed: true,
+        view: window, detail: t === "click" ? 1 : 0, ...init,
+      }));
     }
   }
 
+  function place() {
+    const r = cur.getBoundingClientRect();
+    const pad = 3;
+    box.style.transform = `translate(${r.left - pad}px, ${r.top - pad}px)`;
+    box.style.width = `${r.width + pad * 2}px`;
+    box.style.height = `${r.height + pad * 2}px`;
+  }
+
+  let glideTimer = 0;
   function setCursor(el) {
-    if (cur && cur !== el && cur.isConnected && !osk.isOpen()) {
+    if (cur && cur !== el && cur.isConnected && !osk.keys().includes(cur)) {
       fire(cur, ["pointerout", "mouseout", "mouseleave"], {});
     }
     cur = el;
+    osk.mark(el);
+    paused = false;
     if (!el) { box.style.display = "none"; return; }
-    const r = el.getBoundingClientRect();
-    if (!osk.isOpen() || osk.keys().includes(el)) {
-      const needsScroll = r.top < 90 || r.bottom > innerHeight - 60 || r.left < 0 || r.right > innerWidth;
-      if (needsScroll && !osk.keys().includes(el)) el.scrollIntoView({ block: "center", inline: "nearest" });
+    CC.raise();
+    if (osk.keys().includes(el)) {   // keyboard keys show their own selected state, no floating ring
+      box.style.display = "none";
+      return;
     }
-    if (!osk.keys().includes(el)) {
-      const x = r.left + r.width / 2, y = r.top + r.height / 2;
-      fire(el, ["pointerover", "mouseover", "pointerenter", "mouseenter", "mousemove"], { clientX: x, clientY: y });
+    let r = el.getBoundingClientRect();
+    const needsV = r.top < 90 || r.bottom > innerHeight - 60;
+    if (needsV || r.left < 0 || r.right > innerWidth) {
+      el.scrollIntoView({ block: needsV ? "center" : "nearest", inline: "nearest", behavior: "instant" });
+      r = el.getBoundingClientRect();
     }
+    fire(el, ["pointerover", "mouseover", "pointerenter", "mouseenter", "mousemove"],
+      { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
+    // Glide only between two visible targets; the first show snaps into place.
+    const glide = box.style.display === "block";
+    box.classList.toggle("glide", glide);
+    place();
     box.style.display = "block";
+    clearTimeout(glideTimer);
+    if (glide) glideTimer = setTimeout(() => box.classList.remove("glide"), 160);
     track();
   }
   CC.setCursor = setCursor;
@@ -148,15 +211,14 @@
     if (tracking) return;
     tracking = true;
     const frame = () => {
-      if (!cur || !cur.isConnected || !document.hasFocus()) {
-        box.style.display = "none"; tracking = false; return;
+      if (!cur || !cur.isConnected || paused || !document.hasFocus() || osk.keys().includes(cur)) {
+        if (!osk.keys().includes(cur)) box.style.display = "none";
+        tracking = false;
+        return;
       }
       const r = cur.getBoundingClientRect();
-      const pad = 3;
-      box.style.display = "block";
-      box.style.transform = `translate(${r.left - pad}px, ${r.top - pad}px)`;
-      box.style.width = `${r.width + pad * 2}px`;
-      box.style.height = `${r.height + pad * 2}px`;
+      if (!r.width || !r.height) { box.style.display = "none"; }   // element hidden by the page
+      else { place(); box.style.display = "block"; }
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
@@ -164,18 +226,35 @@
 
   // ---- actions ----
   const playerMode = () => !!document.fullscreenElement && !osk.isOpen();
-  const sendKey = (key) => { try { api.runtime.sendMessage({ type: "key", key }).catch(() => {}); } catch {} };
+
+  function sendKey(key) {
+    // A focused text field would swallow the daemon's real key presses.
+    const a = document.activeElement;
+    if (key !== "slash" && a && osk.isEditable(a)) a.blur();
+    send({ type: "key", key });
+  }
+
+  function lost() {
+    if (!cur || !cur.isConnected) return true;
+    const r = cur.getBoundingClientRect();
+    return !r.width || !r.height || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth;
+  }
 
   function nav(dir, retried = false) {
     controllerMode = true;
     if (playerMode()) return sendKey(dir);
-    const cands = osk.isOpen() ? osk.keys() : collect();
-    if (!cur || !cur.isConnected || (!osk.isOpen() && !cands.includes(cur) && !document.contains(cur))) {
+    const typing = osk.isOpen();
+    const cands = typing ? osk.keys() : collect();
+    if (typing) {
+      if (!cands.includes(cur)) return setCursor(cands[0]);
+    } else if (lost()) {
       return setCursor(nearestToCenter(cands) ?? cands[0] ?? null);
     }
     const next = pick(cur, cands, dir);
     if (next) return setCursor(next);
-    if (osk.isOpen() || retried || (dir !== "up" && dir !== "down")) return;
+    if (typing) return;
+    if (!cands.includes(cur) && cands.length) return setCursor(nearestToCenter(cands));  // e.g. covered by a hover card
+    if (retried || (dir !== "up" && dir !== "down")) return;
     const before = scrollY;
     scrollBy({ top: (dir === "down" ? 1 : -1) * innerHeight * 0.7 });
     if (Date.now() - lastScrollRetry > 100) {
@@ -184,22 +263,61 @@
     }
   }
 
+  function cycleSelect(sel) {
+    if (!sel.options.length) return;
+    sel.selectedIndex = (sel.selectedIndex + 1) % sel.options.length;
+    sel.dispatchEvent(new Event("input", { bubbles: true }));
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    CC.toast(sel.options[sel.selectedIndex].text);
+  }
+
   function select() {
     controllerMode = true;
     if (playerMode()) {
       const skip = [...document.querySelectorAll(SKIP_BUTTONS)].find((b) => b.getBoundingClientRect().width > 0);
       return skip ? skip.click() : sendKey("space");
     }
+    if (osk.isOpen()) return cur?.click();
     if (!cur || !cur.isConnected) return nav("down");
-    if (osk.isOpen()) return cur.click();
-    if (osk.isEditable(cur)) { osk.open(cur); return; }
+    if (osk.isEditable(cur)) return osk.open(cur);
+    if (cur instanceof HTMLSelectElement) return cycleSelect(cur);
+
+    // Real key presses count as a trusted user activation: popups, autoplay, fullscreen and
+    // file choosers all stay allowed, and links honour target=_blank.
+    const key = cur.matches(ENTER_TARGETS) ? "enter" : cur.matches(SPACE_TARGETS) ? "space"
+      : cur.tagName === "IFRAME" ? "space" : null;
+    if (key) {
+      cur.focus({ preventScroll: true });
+      if (document.activeElement === cur || cur.tagName === "IFRAME") return sendKey(key);
+    }
     const r = cur.getBoundingClientRect();
     const init = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0 };
-    if (cur.matches("a,button,input,select,summary,label,textarea")) {
-      cur.click();
-    } else {
-      fire(cur, ["pointerdown", "mousedown", "pointerup", "mouseup", "click"], init);
+    if (cur.matches("a,button,input,summary,label,textarea")) cur.click();
+    else fire(cur, ["pointerdown", "mousedown", "pointerup", "mouseup", "click"], init);
+  }
+
+  function escape() {
+    const t = document.activeElement || document.body;
+    for (const type of ["keydown", "keyup"]) {
+      t.dispatchEvent(new KeyboardEvent(type, { key: "Escape", code: "Escape", keyCode: 27, which: 27,
+        bubbles: true, cancelable: true, composed: true }));
     }
+  }
+
+  // Dismiss an open dialog/popover/menu instead of leaving the page.
+  function dismissOverlay() {
+    const dlg = document.querySelector("dialog[open]");
+    if (dlg) { dlg.close?.(); return true; }
+    const pop = safe(() => [...document.querySelectorAll(":popover-open")].filter((e) => e !== CC.host).pop());
+    if (pop) { safe(() => pop.hidePopover()); return true; }
+    const overlay = [...document.querySelectorAll("[aria-modal=true],[role=menu],[role=listbox]")]
+      .find((e) => isVisible(e));
+    if (!overlay) return false;
+    // Escape can't be verified; if the same overlay is still there on a second press, let B go back.
+    if (lastEscape.el === overlay && Date.now() - lastEscape.at < 1500) return false;
+    lastEscape = { el: overlay, at: Date.now() };
+    escape();
+    return true;
   }
 
   function back() {
@@ -207,7 +325,26 @@
     if (document.fullscreenElement) return void document.exitFullscreen();
     const a = document.activeElement;
     if (a && osk.isEditable(a)) return a.blur();
+    if (dismissOverlay()) return;
     history.back();
+  }
+
+  function findSearch() {
+    return [...document.querySelectorAll(SEARCH_BOXES)].find((e) => osk.isEditable(e) && isVisible(e));
+  }
+
+  function search() {
+    controllerMode = true;
+    if (osk.isOpen()) return;
+    let field = document.activeElement;
+    if (!osk.isEditable(field)) field = findSearch();
+    if (field) { setCursor(field); return osk.open(field); }
+    const launcher = document.querySelector("[data-uia=search-box-launcher]");   // Netflix
+    if (launcher) {
+      launcher.click();
+      return void setTimeout(() => { const f = findSearch(); if (f) { setCursor(f); osk.open(f); } }, 400);
+    }
+    sendKey("slash");   // site-specific search shortcut (YouTube, GitHub, ...)
   }
 
   CC.onOskOpen = () => { pageCur = cur; };
@@ -216,7 +353,7 @@
     pageCur = null;
   };
 
-  // YouTube's "/" (search) and other focus changes made by the controller should raise the keyboard.
+  // Anything that focuses a text field while the controller is in charge should raise the keyboard.
   document.addEventListener("focusin", (e) => {
     if (controllerMode && !osk.isOpen() && osk.isEditable(e.target)) {
       cur = e.target;
@@ -229,12 +366,18 @@
       case "nav": return nav(msg.dir);
       case "select": return select();
       case "back": return back();
+      case "search": return search();
       case "osk": {
         controllerMode = true;
         const a = document.activeElement;
         if (osk.isOpen()) return osk.close();
         return osk.open(osk.isEditable(cur) ? cur : osk.isEditable(a) ? a : null);
       }
+      case "mode":
+        CC.toast(msg.mouse ? "Mouse mode" : "Controller navigation");
+        if (msg.mouse) { paused = true; controllerMode = false; box.style.display = "none"; }
+        else if (!osk.isOpen()) setCursor(lost() ? nearestToCenter(collect()) : cur);
+        return;
       case "report": return reportFocus();
     }
   });

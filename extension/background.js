@@ -50,13 +50,27 @@ api.runtime.onMessage.addListener((msg, sender) => {
   if (msg.type === "focus" && id != null) {
     if (msg.value) focusedTabs.add(id); else focusedTabs.delete(id);
     reportActive();
-  } else if (msg.type === "key") {
-    send({ type: "key", key: msg.key });
+  } else if (msg.type === "typing" || msg.type === "key") {
+    send(msg);
   }
 });
 api.tabs.onRemoved.addListener((id) => { focusedTabs.delete(id); reportActive(); });
+// A navigating tab may land on a page without our content script (about:, PDF viewer, ...);
+// drop its focus flag now and let the new page's script report again.
+api.tabs.onUpdated.addListener((id, change) => {
+  if (change.status === "loading" && focusedTabs.delete(id)) reportActive();
+});
 
-// Wake the worker periodically so it reconnects after being suspended.
+// Content scripts only load into pages opened after install; inject into the tabs already open.
+api.runtime.onInstalled.addListener(async () => {
+  const tabs = await api.tabs.query({ url: ["http://*/*", "https://*/*"] });
+  for (const tab of tabs) {
+    api.scripting.executeScript({ target: { tabId: tab.id }, files: ["osk.js", "content.js"] }).catch(() => {});
+  }
+});
+
+// Wake the worker periodically so it reconnects after being suspended (Firefox event pages
+// are not kept alive by socket traffic; the daemon re-asks for focus state on every connect).
 api.alarms.create("keepalive", { periodInMinutes: 0.5 });
 api.alarms.onAlarm.addListener(connect);
 connect();

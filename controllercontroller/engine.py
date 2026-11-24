@@ -35,7 +35,7 @@ NAV_FIRST_REPEAT = 0.40   # seconds before a held direction starts repeating
 NAV_REPEAT = 0.15
 # Keys the browser extension may ask us to press (e.g. arrows for in-player seeking).
 EXT_KEYS = {"up": e.KEY_UP, "down": e.KEY_DOWN, "left": e.KEY_LEFT, "right": e.KEY_RIGHT,
-            "space": e.KEY_SPACE}
+            "space": e.KEY_SPACE, "enter": e.KEY_ENTER, "slash": e.KEY_SLASH}
 # Actions that fire once on press.
 TAPPED = {"back": e.BTN_SIDE, "fullscreen": e.KEY_F, "search": e.KEY_SLASH}
 
@@ -94,7 +94,7 @@ class Engine:
             if action in DIRS:
                 self._nav[name] = action
                 return
-            if action in ("select", "back", "osk"):
+            if action in ("select", "back", "osk", "search"):
                 self.bridge.send({"type": action})
                 return
             if action == "context":
@@ -104,6 +104,8 @@ class Engine:
         if action == "toggle_mode":
             self.force_mouse = not self.force_mouse
             self._nav.clear()
+            if self.bridge:
+                self.bridge.send({"type": "mode", "mouse": self.force_mouse})
             log.info("mode: %s", "mouse (forced)" if self.force_mouse else "auto")
         elif action in HELD:
             self._held[name] = HELD[action]
@@ -111,7 +113,13 @@ class Engine:
         else:
             self._fire(action)
 
+    def _typing(self) -> bool:
+        return bool(self.bridge and getattr(self.bridge, "typing", False))
+
     def _fire(self, action: str) -> None:
+        # While a text field has focus, a stray "f" or space would be typed into it.
+        if action in ("fullscreen", "search") and self._typing():
+            return
         if action in TAPPED:
             self.out.tap(TAPPED[action])
         elif action == "play_pause":
@@ -122,11 +130,11 @@ class Engine:
             self.bg(self._seek, SEEK_SECONDS, e.KEY_RIGHT)
 
     def _media_or_key(self, fn: Callable[[], bool], key: int) -> None:
-        if not fn():
+        if not fn() and not self._typing():
             self.out.tap(key)
 
     def _seek(self, seconds: int, fallback_key: int) -> None:
-        if not self.media.seek(seconds):
+        if not self.media.seek(seconds) and not self._typing():
             self.out.tap(fallback_key)
 
     def abs_event(self, code: int, value: int, lo: int, hi: int) -> None:

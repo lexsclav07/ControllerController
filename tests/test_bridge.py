@@ -56,3 +56,28 @@ def test_web_pages_are_rejected(origin):
         assert keys == [] and not b.active
 
     asyncio.run(_with_bridge(scenario, keys))
+
+
+def test_actions_only_reach_the_focused_browser_and_typing_is_tracked():
+    keys = []
+
+    async def scenario(b):
+        url, origin = f"ws://127.0.0.1:{PORT}", "chrome-extension://abc"
+        async with connect(url, origin=origin) as focused, connect(url, origin=origin) as other:
+            await focused.recv(); await other.recv()   # "report" greeting
+            await focused.send(json.dumps({"type": "active", "value": True}))
+            await focused.send(json.dumps({"type": "typing", "value": True}))
+            await other.send(json.dumps({"type": "typing", "value": True}))
+            await asyncio.sleep(0.1)
+            assert b.typing
+            b.send({"type": "nav", "dir": "down"})
+            b.send({"type": "ping"})
+            assert json.loads(await focused.recv())["type"] == "nav"
+            assert json.loads(await focused.recv())["type"] == "ping"
+            # the unfocused browser must not receive the nav, only the ping
+            assert json.loads(await asyncio.wait_for(other.recv(), 1))["type"] == "ping"
+            await focused.send(json.dumps({"type": "typing", "value": False}))
+            await asyncio.sleep(0.1)
+            assert not b.typing   # unfocused client's typing flag is ignored
+
+    asyncio.run(_with_bridge(scenario, keys))

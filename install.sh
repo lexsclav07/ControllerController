@@ -11,12 +11,15 @@ python3 -m venv "$dest/venv"
 mkdir -p "$HOME/.config/systemd/user"
 cp "$here/packaging/controllercontroller.service" "$HOME/.config/systemd/user/"
 systemctl --user daemon-reload
-systemctl --user enable --now controllercontroller.service
+systemctl --user enable controllercontroller.service
+systemctl --user restart controllercontroller.service   # picks up updates; `enable --now` would leave an old daemon running
 
-if [ ! -w /dev/uinput ]; then
-  echo
-  echo "/dev/uinput is not writable by you. Run once, then log out and in:"
-  echo "  sudo cp $here/packaging/70-controllercontroller.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger"
-fi
 echo
-echo "Daemon installed and running. Now install the browser extension from $here/extension (see README)."
+if [ ! -w /dev/uinput ]; then
+  echo "Almost done: /dev/uinput is not writable by you, so the daemon cannot start yet."
+  echo "Run this once, then log out and in:"
+  echo "  sudo cp $here/packaging/70-controllercontroller.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger"
+else
+  echo "Daemon installed and running (it also starts on login)."
+fi
+echo "Next: load the browser extension from $here/extension (see README, 'Install')."

@@ -127,7 +127,7 @@ def test_default_config_written_on_first_run(tmp_path):
 
 class FakeBridge:
     def __init__(self, active=True):
-        self.active, self.sent = active, []
+        self.active, self.sent, self.typing = active, [], False
 
     def send(self, msg):
         self.sent.append(msg)
@@ -198,3 +198,56 @@ def test_extension_keys_are_whitelisted():
     eng.ext_key("left")
     eng.ext_key("rm -rf")
     assert out.events == [("tap", e.KEY_LEFT)]
+
+
+# ---- audit regressions -------------------------------------------------
+
+def test_bluetooth_xbox_layout_is_remapped_to_xpad():
+    from controllercontroller.controller import axis_remap
+    bt = {e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ, e.ABS_GAS, e.ABS_BRAKE, e.ABS_HAT0X, e.ABS_HAT0Y}
+    usb = {e.ABS_X, e.ABS_Y, e.ABS_RX, e.ABS_RY, e.ABS_Z, e.ABS_RZ, e.ABS_HAT0X}
+    m = axis_remap(bt)
+    assert m[e.ABS_Z] == e.ABS_RX and m[e.ABS_RZ] == e.ABS_RY
+    assert m[e.ABS_GAS] == e.ABS_RZ and m[e.ABS_BRAKE] == e.ABS_Z
+    assert axis_remap(usb) == {}
+
+    eng, out, _ = make()   # right stick fully down on the BT pad, then RT squeezed
+    eng.abs_event(m[e.ABS_RZ], 65535, 0, 65535)
+    eng.tick(0.1)
+    assert out.events and out.events[0][0] == "scroll" and out.events[0][2] < 0
+    eng.abs_event(m[e.ABS_GAS], 1023, 0, 1023)
+    assert ("key", e.KEY_VOLUMEUP, True) in out.events
+
+
+def test_typing_blocks_stray_keys_but_not_media_calls():
+    eng, out, bridge = make_browser()
+    bridge.typing = True
+    eng.button("SELECT", True)   # fullscreen -> "f" would be typed into the field
+    assert out.events == []
+    eng.media.ok = False
+    eng.button("START", True)    # play/pause fallback is a space key: also suppressed
+    assert out.events == []
+    bridge.typing = False
+    eng.button("SELECT", True)
+    assert out.events == [("tap", e.KEY_F)]
+
+
+def test_search_goes_to_extension_in_browser_mode_and_slash_otherwise():
+    eng, out, bridge = make_browser()
+    eng.button("Y", True)
+    assert bridge.sent == [{"type": "search"}] and out.events == []
+    eng, out, _ = make_browser(active=False)
+    eng.button("Y", True)
+    assert out.events == [("tap", e.KEY_SLASH)]
+
+
+def test_guide_tells_extension_about_mode():
+    eng, _, bridge = make_browser()
+    eng.button("GUIDE", True)
+    assert bridge.sent == [{"type": "mode", "mouse": True}]
+
+
+def test_extension_may_press_enter_and_slash():
+    eng, out, _ = make_browser()
+    eng.ext_key("enter"); eng.ext_key("slash")
+    assert out.events == [("tap", e.KEY_ENTER), ("tap", e.KEY_SLASH)]

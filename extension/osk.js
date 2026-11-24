@@ -1,46 +1,105 @@
-// On-screen keyboard + the shadow-DOM overlay shared with content.js.
+// On-screen keyboard + the shadow-DOM overlay (focus box, toast) shared with content.js.
 (() => {
   if (window.top !== window || window.__cc) return;
   const CC = (window.__cc = {});
 
   const host = document.createElement("div");
   host.id = "__controllercontroller";
+  host.popover = "manual"; // top layer: stays above <dialog>.showModal() and other popovers
   host.style.cssText = "all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647;";
   const root = host.attachShadow({ mode: "closed" });
   root.innerHTML = `<style>
-    .osk{position:fixed;left:0;right:0;bottom:0;padding:14px 18px 18px;background:rgba(18,18,22,.96);
-      box-shadow:0 -6px 30px rgba(0,0,0,.5);font:600 22px system-ui,sans-serif;display:none;
-      pointer-events:none;color:#fff}
-    .osk.open{display:block}
-    .row{display:flex;gap:8px;justify-content:center;margin:8px 0}
-    .key{flex:1 1 0;max-width:84px;min-height:54px;border-radius:10px;background:#34343c;display:flex;
-      align-items:center;justify-content:center;user-select:none}
-    .key.wide{flex:2 1 0;max-width:170px}.key.space{flex:6 1 0;max-width:520px}
-    .key.on{background:#4a6fff}
+    /* libadwaita look. Dark by default; light follows the browser, which follows GNOME's colour scheme.
+       AccentColor is the desktop accent in Firefox; other browsers fall back to Adwaita blue. */
+    .ui{
+      color-scheme:light dark;
+      --font:"Adwaita Sans",Cantarell,system-ui,sans-serif;
+      --ease:cubic-bezier(.25,.46,.45,.94);
+      --kh:min(clamp(46px,6.6vh,76px),9vh);   /* key height follows the window, not page zoom */
+      --gap:calc(var(--kh) * .14);
+      --bg:#222226; --fg:#fff; --edge:rgb(255 255 255/.08); --shade:rgb(0 0 6/.45);
+      --accent-bg:#3584e4; --accent-fg:#fff;
+    }
+    @supports (color:AccentColor){.ui{--accent-bg:AccentColor;--accent-fg:AccentColorText}}
+    @media (prefers-color-scheme:light){
+      .ui{--bg:#fafafb;--fg:rgb(0 0 6/.8);--edge:rgb(0 0 6/.1);--shade:rgb(0 0 6/.2)}
+    }
+    .osk{position:fixed;left:0;right:0;bottom:0;display:none;pointer-events:none;box-sizing:border-box;
+      padding:calc(var(--gap) * 1.6) max(16px,calc((100% - var(--kh) * 17) / 2)) calc(var(--gap) * 2);
+      background:var(--bg);color:var(--fg);border-top:1px solid var(--edge);box-shadow:0 -8px 32px var(--shade);
+      font:700 calc(var(--kh) * .42)/1 var(--font);font-synthesis:none}
+    .osk.open{display:flex;flex-direction:column;gap:var(--gap);animation:cc-rise .2s var(--ease)}
+    @keyframes cc-rise{from{transform:translateY(14%);opacity:0}}
+    .row{display:flex;gap:var(--gap)}
+    .key{flex:1 1 0;min-width:0;height:var(--kh);border-radius:calc(var(--kh) * .22);
+      background:color-mix(in srgb,currentColor 10%,transparent);
+      display:flex;align-items:center;justify-content:center;user-select:none;
+      transition:transform .1s var(--ease)}
+    .key.t{font-size:.74em}
+    .key.on{background:color-mix(in srgb,var(--accent-bg) 35%,transparent)}   /* shift latched */
+    .key.sel{background:var(--accent-bg);color:var(--accent-fg)}              /* controller selection */
+    .key.hit{transform:scale(.93)}
+    .ic{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .ic.f{fill:currentColor}
+    /* Focus ring: accent + white keyline so it reads on white, black and photographic pages. */
     .box{position:fixed;left:0;top:0;width:0;height:0;display:none;box-sizing:border-box;
-      border:3px solid #fff;outline:3px solid #1a73e8;border-radius:8px;
-      box-shadow:0 0 0 2px rgba(0,0,0,.55),0 4px 18px rgba(0,0,0,.45);
-      transition:transform .08s ease-out,width .08s ease-out,height .08s ease-out}
-  </style><div class="osk"></div><div class="box"></div>`;
+      border:3px solid var(--accent-bg);border-radius:12px;
+      box-shadow:0 0 0 2px rgb(255 255 255/.92),0 6px 20px rgb(0 0 0/.35)}
+    .box.glide{transition:transform .12s var(--ease),width .12s var(--ease),height .12s var(--ease)}
+    .toast{position:fixed;left:50%;bottom:5vh;transform:translateX(-50%);padding:.65em 1.3em;border-radius:99px;
+      background:rgb(0 0 0/.65);color:rgb(255 255 255/.92);font:700 20px/1 var(--font);opacity:0;
+      transition:opacity .2s var(--ease)}
+    .toast.show{opacity:1}
+    @media (prefers-reduced-motion:reduce){.ui *{animation:none!important;transition:none!important}}
+  </style><div class="ui"><div class="osk"></div><div class="box"></div><div class="toast"></div></div>`;
   CC.host = host;
   CC.root = root;
   CC.boxEl = root.querySelector(".box");
   const oskEl = root.querySelector(".osk");
+  const toastEl = root.querySelector(".toast");
   document.documentElement.appendChild(host);
+  try { host.showPopover(); } catch {}
 
-  const L = {
-    lower: ["1234567890", "qwertyuiop", "asdfghjkl'", ["shift", ..."zxcvbnm", "bksp"],
-      ["sym", "@", "space", ".", "-", "left", "right", "enter", "close"]],
-    upper: ["1234567890", "QWERTYUIOP", 'ASDFGHJKL"', ["shift", ..."ZXCVBNM", "bksp"],
-      ["sym", "@", "space", ".", "-", "left", "right", "enter", "close"]],
-    sym: ["!@#$%^&*()", "~`|\\/:;?_=", "+[]{}<>,.-", ["shift", "#", "$", "%", "&", "*", "bksp"],
-      ["abc", "@", "space", ".", "-", "left", "right", "enter", "close"]],
+  // Re-promote above anything the page put in the top layer after us (e.g. a modal dialog).
+  CC.raise = () => {
+    try {
+      const shown = host.matches(":popover-open");
+      if (shown && !document.querySelector("dialog[open],[popover]:popover-open:not(#__controllercontroller)")) return;
+      if (shown) host.hidePopover();
+      host.showPopover();
+    } catch {}
   };
-  const LABEL = { shift: "⇧", bksp: "⌫", sym: "?123", abc: "ABC", space: "space", left: "◀",
-    right: "▶", enter: "⏎", close: "✕" };
-  const WIDE = new Set(["shift", "bksp", "sym", "abc", "enter"]);
+
+  let toastTimer = 0;
+  CC.toast = (text) => {
+    toastEl.textContent = text;
+    toastEl.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1600);
+  };
+
+  const BOTTOM = ["sym", "@", ",", "space", ".", "-", "left", "right", "enter", "close"];
+  const L = {
+    lower: ["1234567890", "qwertyuiop", "asdfghjkl'", ["shift", ..."zxcvbnm", "bksp"], BOTTOM],
+    upper: ["1234567890", "QWERTYUIOP", 'ASDFGHJKL"', ["shift", ..."ZXCVBNM", "bksp"], BOTTOM],
+    sym: ["!@#$%^&*()", "_=+[]{}<>€", ["`", "'", '"', "~", "\\", "|", "/", ":", ";", "?", "bksp"],
+      ["abc", ...BOTTOM.slice(1)]],
+  };
+
+  const TEXT_KEYS = new Set(["sym", "abc", "space"]);
+  const LABEL = { sym: "?123", abc: "ABC", space: "space" };
+  const ICON = {
+    shift: '<path d="M12 4 4 12.5h4.5V19h7v-6.5H20z"/>',
+    bksp: '<path d="M9 5h10.5A1.5 1.5 0 0 1 21 6.5v11a1.5 1.5 0 0 1-1.5 1.5H9l-6-7z"/><path d="m12.5 9.5 5 5m0-5-5 5"/>',
+    left: '<path d="m14.5 6-6 6 6 6"/>',
+    right: '<path d="m9.5 6 6 6-6 6"/>',
+    enter: '<path d="M19 6v5.5a2 2 0 0 1-2 2H5.5m0 0 4-4m-4 4 4 4"/>',
+    close: '<path d="m6.5 6.5 11 11m0-11-11 11"/>',
+  };
+  const GROW = { shift: 1.5, bksp: 1.5, sym: 1.5, abc: 1.5, enter: 1.5, space: 3 };
 
   let target = null, layer = "lower", open = false;
+  let lastPos = { r: 2, c: 4, last: false };   // where the controller cursor sits, kept across re-renders
 
   const isEditable = (el) => {
     if (!el || el.nodeType !== 1) return false;
@@ -63,12 +122,20 @@
   }
 
   function moveCaret(delta) {
+    const el = target;
     try {
-      if (target.isContentEditable) {
+      if (el.isContentEditable) {
         getSelection().modify("move", delta < 0 ? "backward" : "forward", "character");
+      } else if (el.selectionStart == null) {
+        // email/number inputs refuse selection APIs; borrow type=text for a moment.
+        const type = el.type, len = el.value.length;
+        el.type = "text";
+        const p = Math.min(len, Math.max(0, (el.selectionStart ?? len) + delta));
+        el.setSelectionRange(p, p);
+        el.type = type;
       } else {
-        const p = Math.max(0, target.selectionStart + delta);
-        target.setSelectionRange(p, p);
+        const p = Math.max(0, el.selectionStart + delta);
+        el.setSelectionRange(p, p);
       }
     } catch {}
   }
@@ -76,9 +143,9 @@
   function press(id) {
     if (!target || !target.isConnected) return close();
     switch (id) {
-      case "shift": layer = layer === "lower" ? "upper" : "lower"; return render("shift");
-      case "sym": layer = "sym"; return render("sym");
-      case "abc": layer = "lower"; return render("abc");
+      case "shift": layer = layer === "lower" ? "upper" : "lower"; return render();
+      case "sym": layer = "sym"; return render();
+      case "abc": layer = "lower"; return render();
       case "close": return close();
       case "space": insert(" "); break;
       case "bksp": target.focus({ preventScroll: true }); document.execCommand("delete"); break;
@@ -87,48 +154,72 @@
       case "enter": return enter();
       default:
         insert(id);
-        if (layer === "upper") { layer = "lower"; render(id); }
+        if (layer === "upper") { layer = "lower"; render(); }
     }
   }
 
   function enter() {
     const el = target;
-    if (el instanceof HTMLTextAreaElement) return insert("\n");
-    if (el.isContentEditable) { el.focus(); return void document.execCommand("insertParagraph"); }
-    const init = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true };
+    const init = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
+    // Let the page handle Enter first (search boxes, chat inputs); only fall back to default behaviour.
     const proceed = el.dispatchEvent(new KeyboardEvent("keydown", init));
     el.dispatchEvent(new KeyboardEvent("keypress", init));
     el.dispatchEvent(new KeyboardEvent("keyup", init));
+    if (!proceed) return close();
+    if (el instanceof HTMLTextAreaElement) return insert("\n");
+    if (el.isContentEditable) { el.focus(); return void document.execCommand("insertParagraph"); }
+    const form = el.form;
     close();
-    if (proceed && el.form) el.form.requestSubmit?.();
+    form?.requestSubmit?.();
   }
 
-  function render(keepId) {
+  function render() {
     oskEl.textContent = "";
-    for (const row of L[layer]) {
+    L[layer].forEach((row, r) => {
       const rowEl = document.createElement("div");
       rowEl.className = "row";
-      for (const id of row) {
+      [...row].forEach((id, c) => {
         const k = document.createElement("div");
-        k.className = "key" + (WIDE.has(id) ? " wide" : "") + (id === "space" ? " space" : "") +
-          (id === "shift" && layer === "upper" ? " on" : "");
-        k.textContent = LABEL[id] ?? id;
-        k.dataset.id = id;
-        k.addEventListener("click", () => press(id));
+        const latched = id === "shift" && layer === "upper";
+        k.className = "key" + (TEXT_KEYS.has(id) ? " t" : "") + (latched ? " on" : "");
+        k.style.flexGrow = GROW[id] ?? 1;
+        if (ICON[id]) {
+          k.innerHTML = `<svg class="ic${latched ? " f" : ""}" viewBox="0 0 24 24" aria-hidden="true">${ICON[id]}</svg>`;
+        } else {
+          k.textContent = LABEL[id] ?? id;
+        }
+        k.dataset.id = id; k.dataset.r = r; k.dataset.c = c;
+        k.addEventListener("click", () => {
+          k.classList.add("hit");
+          setTimeout(() => k.classList.remove("hit"), 110);
+          press(id);
+        });
         rowEl.appendChild(k);
-      }
+      });
       oskEl.appendChild(rowEl);
-    }
-    if (keepId && CC.setCursor) {
-      CC.setCursor(oskEl.querySelector(`[data-id="${CSS.escape(keepId)}"]`) ?? oskEl.querySelector(".key"));
+    });
+    const rows = [...oskEl.children];
+    const row = rows[Math.min(lastPos.r, rows.length - 1)];
+    const keys = [...row.children];
+    CC.setCursor?.(keys[lastPos.last ? keys.length - 1 : Math.min(lastPos.c, keys.length - 1)]);
+  }
+
+  // Highlight the controller's selection and remember its position across layer changes.
+  function mark(el) {
+    for (const k of oskEl.querySelectorAll(".sel")) k.classList.remove("sel");
+    if (el && oskEl.contains(el)) {
+      el.classList.add("sel");
+      lastPos = { r: +el.dataset.r, c: +el.dataset.c, last: !el.nextElementSibling };
     }
   }
 
   function openFor(el) {
     if (open || !isEditable(el)) return;
+    CC.raise();
     target = el;
     open = true;
     layer = "lower";
+    lastPos = { r: 2, c: 4, last: false };
     oskEl.classList.add("open");
     el.focus({ preventScroll: true });
     el.scrollIntoView({ block: "center" });
@@ -138,7 +229,7 @@
       if (r.bottom > limit) window.scrollBy({ top: r.bottom - limit });
     }, 60);
     CC.onOskOpen?.();
-    render("g");
+    render();
   }
 
   function close() {
@@ -147,9 +238,11 @@
     oskEl.classList.remove("open");
     const el = target;
     target = null;
+    // Leave no field focused, otherwise the daemon's real key presses would be typed into it.
+    if (el && document.activeElement === el) el.blur();
     CC.onOskClose?.(el);
   }
 
-  CC.osk = { isEditable, open: openFor, close, isOpen: () => open,
+  CC.osk = { isEditable, open: openFor, close, mark, isOpen: () => open,
     keys: () => [...oskEl.querySelectorAll(".key")] };
 })();
