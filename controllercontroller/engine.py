@@ -98,9 +98,12 @@ class Engine:
             if action in ("select", "back", "osk", "search"):
                 self.bridge.send({"type": action})
                 return
+            if action == "help":   # the overlay lists the live bindings, so it survives remapping
+                self.bridge.send({"type": "help", "bindings": self.bindings})
+                return
             if action == "context":
                 return
-        elif action == "osk":
+        elif action in ("osk", "help"):
             return
         if action == "toggle_mode":
             self.force_mouse = not self.force_mouse

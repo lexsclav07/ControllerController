@@ -94,6 +94,18 @@ try:
     send(type="nav", dir="down"); check("modal dialog button reachable", focused(), "dbtn")
     send(type="back"); check("back closes dialog", js("document.getElementById('dlg').open"), False)
     check("page not navigated away", js("location.pathname.endsWith('page.html')"), True)
+    # controls list: shows live bindings, swallows the next button press, then goes away
+    js("window.__cc.showHelp && 0")
+    send(type="help", bindings={"A": "select", "R3": "fullscreen", "DPAD_UP": "up", "X": "help", "Y": "none"})
+    helptext = js("window.__cc.root.querySelector('.help').innerText")
+    check("help open", js("window.__cc.helpIsOpen()"), True)
+    check("help lists bindings (remapped R3 -> Fullscreen)", "Right stick click" in helptext and "Fullscreen" in helptext, True)
+    check("help hides unbound and direction-only d-pad rows", "D-pad up" not in helptext and "Y" not in helptext.replace("Controls", ""), True)
+    n_clicks = js("window.clicked.length")
+    send(type="select")
+    check("any button closes help without acting", js("window.__cc.helpIsOpen()") is False and js("window.clicked.length") == n_clicks, True)
+    send(type="help", bindings={}); send(type="help", bindings={})
+    check("help toggles", js("window.__cc.helpIsOpen()"), False)
     # mouse mode toast/pause, then resume
     send(type="mode", mouse=True)
     check("box hidden in forced mouse mode", js("window.__cc.boxEl.style.display"), "none")

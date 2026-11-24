@@ -362,6 +362,9 @@
   }, true);
 
   api.runtime.onMessage.addListener((msg) => {
+    if (msg.type === "help") return CC.helpIsOpen() ? CC.hideHelp() : CC.showHelp(msg.bindings);
+    // While the controls list is up, any button just dismisses it (sticks are ignored).
+    if (CC.helpIsOpen() && !["report", "mode", "nav"].includes(msg.type)) return CC.hideHelp();
     switch (msg.type) {
       case "nav": return nav(msg.dir);
       case "select": return select();

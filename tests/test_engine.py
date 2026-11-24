@@ -144,6 +144,7 @@ def make_browser(active=True):
 
 def test_browser_mode_routes_select_back_osk_to_extension():
     eng, out, bridge = make_browser()
+    eng.bindings["X"] = "osk"   # X is "help" by default
     for b in ("A", "B", "X"):
         eng.button(b, True)
         eng.button(b, False)
@@ -262,3 +263,14 @@ def test_stick_clicks_switch_tabs_in_both_modes():
         eng.button("L3", True)
         assert out.events == [("combo", e.KEY_LEFTCTRL, e.KEY_PAGEDOWN),
                               ("combo", e.KEY_LEFTCTRL, e.KEY_PAGEUP)]
+
+
+def test_help_sends_live_bindings_to_extension_and_is_silent_in_mouse_mode():
+    eng, out, bridge = make_browser()
+    eng.bindings["R3"] = "fullscreen"          # remapped bindings must show up in the overlay
+    eng.button("X", True)
+    msg = bridge.sent[0]
+    assert msg["type"] == "help" and msg["bindings"]["R3"] == "fullscreen" and msg["bindings"]["X"] == "help"
+    eng, out, bridge = make_browser(active=False)
+    eng.button("X", True)
+    assert bridge.sent == [] and out.events == []

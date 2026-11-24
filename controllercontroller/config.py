@@ -17,13 +17,13 @@ BUTTONS = (
 ACTIONS = (
     "select", "context", "back", "up", "down", "left", "right",
     "seek_back", "seek_fwd", "vol_up", "vol_down", "play_pause",
-    "fullscreen", "search", "osk", "toggle_mode", "tab_prev", "tab_next", "none",
+    "fullscreen", "search", "osk", "help", "toggle_mode", "tab_prev", "tab_next", "none",
 )
 
 DEFAULT_BINDINGS: dict[str, str] = {
     "A": "select",
     "B": "back",
-    "X": "osk",
+    "X": "help",
     "Y": "search",
     "LB": "seek_back",
     "RB": "seek_fwd",

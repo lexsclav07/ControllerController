@@ -50,13 +50,26 @@
       background:rgb(0 0 0/.65);color:rgb(255 255 255/.92);font:700 20px/1 var(--font);opacity:0;
       transition:opacity .2s var(--ease)}
     .toast.show{opacity:1}
+    .help{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);display:none;box-sizing:border-box;
+      width:min(760px,92vw);max-height:88vh;overflow:hidden;padding:calc(var(--kh) * .5) calc(var(--kh) * .6);
+      background:var(--bg);color:var(--fg);border:1px solid var(--edge);border-radius:18px;
+      box-shadow:0 12px 48px var(--shade);font:500 calc(var(--kh) * .36)/1.2 var(--font)}
+    .help.open{display:block;animation:cc-pop .2s var(--ease)}
+    @keyframes cc-pop{from{opacity:0;transform:translate(-50%,-48%) scale(.97)}}
+    .help h2{margin:0 0 .7em;font:800 1.25em/1 var(--font)}
+    .help .grid{display:grid;grid-template-columns:1fr 1fr;gap:.55em 2em}
+    .help .row2{display:flex;align-items:center;gap:.7em;min-width:0}
+    .help .chip{flex:none;min-width:3.4em;padding:.35em .6em;border-radius:.55em;text-align:center;font-weight:700;
+      background:color-mix(in srgb,currentColor 10%,transparent)}
+    .help .hint{margin:1em 0 0;opacity:.65;font-size:.85em}
     @media (prefers-reduced-motion:reduce){.ui *{animation:none!important;transition:none!important}}
-  </style><div class="ui"><div class="osk"></div><div class="box"></div><div class="toast"></div></div>`;
+  </style><div class="ui"><div class="osk"></div><div class="box"></div><div class="toast"></div><div class="help"></div></div>`;
   CC.host = host;
   CC.root = root;
   CC.boxEl = root.querySelector(".box");
   const oskEl = root.querySelector(".osk");
   const toastEl = root.querySelector(".toast");
+  const helpEl = root.querySelector(".help");
   document.documentElement.appendChild(host);
   try { host.showPopover(); } catch {}
 
@@ -64,7 +77,8 @@
   CC.raise = () => {
     try {
       const shown = host.matches(":popover-open");
-      if (shown && !document.querySelector("dialog[open],[popover]:popover-open:not(#__controllercontroller)")) return;
+      if (shown && !document.fullscreenElement &&
+          !document.querySelector("dialog[open],[popover]:popover-open:not(#__controllercontroller)")) return;
       if (shown) host.hidePopover();
       host.showPopover();
     } catch {}
@@ -76,6 +90,52 @@
     toastEl.classList.add("show");
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1600);
+  };
+
+  // ---- controls cheat sheet (built from the daemon's live bindings) ----
+  const ORDER = ["A", "B", "X", "Y", "LB", "RB", "LT", "RT", "START", "SELECT", "GUIDE", "L3", "R3",
+    "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT"];
+  const BUTTON_LABEL = { START: "Menu", SELECT: "View", GUIDE: "Xbox", L3: "Left stick click",
+    R3: "Right stick click", DPAD_UP: "D-pad up", DPAD_DOWN: "D-pad down", DPAD_LEFT: "D-pad left",
+    DPAD_RIGHT: "D-pad right" };
+  const ACTION_LABEL = { select: "Select", context: "Right-click", back: "Back / close", up: "Up", down: "Down",
+    left: "Left", right: "Right", seek_back: "Back 10 seconds", seek_fwd: "Forward 10 seconds",
+    vol_up: "Volume up", vol_down: "Volume down", play_pause: "Play / pause", fullscreen: "Fullscreen",
+    search: "Search", osk: "Keyboard", help: "This list", toggle_mode: "Mouse mode on / off",
+    tab_prev: "Previous tab", tab_next: "Next tab" };
+  const DIRS = new Set(["up", "down", "left", "right"]);
+
+  CC.helpIsOpen = () => helpEl.classList.contains("open");
+  CC.hideHelp = () => helpEl.classList.remove("open");
+  CC.showHelp = (bindings = {}) => {
+    CC.raise();
+    const rows = [["Left stick / D-pad", "Move"], ["Right stick", "Scroll"]];
+    for (const b of ORDER) {
+      const a = bindings[b];
+      if (!a || a === "none" || (b.startsWith("DPAD_") && DIRS.has(a))) continue;
+      rows.push([BUTTON_LABEL[b] ?? b, ACTION_LABEL[a] ?? String(a)]);
+    }
+    helpEl.textContent = "";
+    const title = document.createElement("h2");
+    title.textContent = "Controls";
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    for (const [chip, label] of rows) {
+      const row = document.createElement("div");
+      row.className = "row2";
+      const c = document.createElement("span");
+      c.className = "chip";
+      c.textContent = chip;
+      const t = document.createElement("span");
+      t.textContent = label;
+      row.append(c, t);
+      grid.appendChild(row);
+    }
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent = "Press any button to close";
+    helpEl.append(title, grid, hint);
+    helpEl.classList.add("open");
   };
 
   const BOTTOM = ["sym", "@", ",", "space", ".", "-", "left", "right", "enter", "close"];
