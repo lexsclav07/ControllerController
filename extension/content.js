@@ -85,7 +85,8 @@
     if (moved >= 2) takeOver();
   }, { capture: true, passive: true });
   for (const type of ["mousedown", "keydown"]) {
-    addEventListener(type, (e) => { if (e.isTrusted) userInput(); }, { capture: true, passive: true });
+    // Auto-repeat of a held key is not new input (the controller can hold keys for you).
+    addEventListener(type, (e) => { if (e.isTrusted && !e.repeat) userInput(); }, { capture: true, passive: true });
   }
   document.addEventListener("focusin", (e) => {
     if (osk.isEditable(e.target)) send({ type: "typing", value: true });
@@ -331,10 +332,12 @@
     CC.toast(sel.options[sel.selectedIndex].text);
   }
 
+  const skipButton = () => [...document.querySelectorAll(SKIP_BUTTONS)].find((b) => b.getBoundingClientRect().width > 0);
+
   function select() {
     controllerMode = true;
     if (playerMode()) {
-      const skip = [...document.querySelectorAll(SKIP_BUTTONS)].find((b) => b.getBoundingClientRect().width > 0);
+      const skip = skipButton();
       return skip ? skip.click() : sendKey("space");
     }
     if (osk.isOpen()) return cur?.click();
@@ -434,7 +437,7 @@
     if (msg.type === "report") return reportFocus();
     markCtl();   // whatever key presses follow are the controller's, not the user's keyboard
     if (msg.type === "ctl") return;
-    if (msg.type === "help") return CC.helpIsOpen() ? CC.hideHelp() : CC.showHelp(msg.bindings);
+    if (msg.type === "help") return CC.helpIsOpen() ? CC.hideHelp() : CC.showHelp(msg.bindings, msg.labels);
     // While the controls list is up, any button just dismisses it (sticks are ignored).
     if (CC.helpIsOpen() && !["mode", "nav"].includes(msg.type)) return CC.hideHelp();
     if (idle) {
@@ -446,6 +449,10 @@
       case "nav": return nav(msg.dir);
       case "select": return select();
       case "back": return back();
+      case "skip": {   // intro / recap / ad / next episode
+        const b = skipButton();
+        return b ? b.click() : CC.toast("Nothing to skip");
+      }
       case "search": return search();
       case "osk": {
         controllerMode = true;

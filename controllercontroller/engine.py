@@ -9,6 +9,7 @@ from typing import Callable
 from evdev import ecodes as e
 
 from . import media as default_media
+from .config import action_label, key_codes, PAGE_SHORTCUTS
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,11 @@ NAV_REPEAT = 0.15
 EXT_KEYS = {"up": e.KEY_UP, "down": e.KEY_DOWN, "left": e.KEY_LEFT, "right": e.KEY_RIGHT,
             "space": e.KEY_SPACE, "enter": e.KEY_ENTER, "slash": e.KEY_SLASH}
 TAB_KEYS = {"tab_prev": e.KEY_PAGEUP, "tab_next": e.KEY_PAGEDOWN}
+SCROLL_STEP = 360         # hi-res wheel units per press of a scroll button (three notches)
+# Bound keys that keep repeating while the button is held; everything else is a single tap.
+REPEATABLE = {e.KEY_UP, e.KEY_DOWN, e.KEY_LEFT, e.KEY_RIGHT, e.KEY_PAGEUP, e.KEY_PAGEDOWN,
+              e.KEY_HOME, e.KEY_END, e.KEY_BACKSPACE, e.KEY_DELETE, e.KEY_TAB}
+COMMAND_MODS = {e.KEY_LEFTCTRL, e.KEY_LEFTALT, e.KEY_LEFTMETA}
 # Actions that fire once on press.
 TAPPED = {"back": e.BTN_SIDE, "fullscreen": e.KEY_F, "search": e.KEY_SLASH}
 
@@ -67,7 +73,7 @@ class Engine:
         self.force_mouse = False
         self.sticks = {"lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0}
         self._frac = {"px": 0.0, "py": 0.0, "sx": 0.0, "sy": 0.0}
-        self._held: dict[str, int] = {}       # button -> key code currently held down
+        self._held: dict[str, tuple[int, ...]] = {}   # button -> key codes currently held down
         self._nav: dict[str, str] = {}        # button -> direction (browser mode)
         self._dpad_on: set[str] = set()
         self._trigger_down = {"LT": False, "RT": False}
@@ -88,22 +94,24 @@ class Engine:
     def button(self, name: str, pressed: bool) -> None:
         action = self.bindings.get(name, "none")
         if not pressed:
-            if self._nav.pop(name, None) is None and name in self._held:
-                self.out.key(self._held.pop(name), False)
+            if self._nav.pop(name, None) is None:
+                for code in reversed(self._held.pop(name, ())):
+                    self.out.key(code, False)
             return
         if self.browser_mode:
             if action in DIRS:
                 self._nav[name] = action
                 return
-            if action in ("select", "back", "osk", "search"):
+            if action in ("select", "back", "osk", "search", "skip"):
                 self.bridge.send({"type": action})
                 return
             if action == "help":   # the overlay lists the live bindings, so it survives remapping
-                self.bridge.send({"type": "help", "bindings": self.bindings})
+                labels = {a: action_label(a) for a in set(self.bindings.values())}
+                self.bridge.send({"type": "help", "bindings": self.bindings, "labels": labels})
                 return
             if action == "context":
                 return
-        elif action in ("osk", "help"):
+        elif action in ("osk", "help", "skip"):
             return
         if action == "toggle_mode":
             self.force_mouse = not self.force_mouse
@@ -112,21 +120,45 @@ class Engine:
                 self.bridge.send({"type": "mode", "mouse": self.force_mouse})
             log.info("mode: %s", "mouse (forced)" if self.force_mouse else "auto")
         elif action in HELD:
-            self._held[name] = HELD[action]
+            self._held[name] = (HELD[action],)
             self.out.key(HELD[action], True)
+        elif codes := key_codes(action):
+            self._press_keys(name, action, codes)
         else:
             self._fire(action)
 
     def _typing(self) -> bool:
         return bool(self.bridge and getattr(self.bridge, "typing", False))
 
+    def _announce(self) -> None:
+        """Tell the page the key presses that follow are ours, so it doesn't take them for the keyboard."""
+        if self.bridge:
+            self.bridge.send({"type": "ctl"})
+
+    def _press_keys(self, name: str, action: str, codes: tuple[int, ...]) -> None:
+        """A bound key or shortcut: held (so it repeats) for navigation keys, otherwise one tap."""
+        if action in PAGE_SHORTCUTS and self._typing():   # site hotkeys would be typed into the field
+            return
+        self._announce()
+        if codes[-1] in REPEATABLE and not COMMAND_MODS & set(codes[:-1]):
+            self._held[name] = codes
+            for code in codes:
+                self.out.key(code, True)
+        else:
+            self.out.chord(codes)
+
     def _fire(self, action: str) -> None:
+        if action == "none":
+            return
         # While a text field has focus, a stray "f" or space would be typed into it.
         if action in ("fullscreen", "search") and self._typing():
             return
-        if self.bridge:   # the key presses below must not look like the user's keyboard to the page
-            self.bridge.send({"type": "ctl"})
-        if action in TAPPED:
+        self._announce()
+        if action == "scroll_up":
+            self.out.scroll(0, SCROLL_STEP)
+        elif action == "scroll_down":
+            self.out.scroll(0, -SCROLL_STEP)
+        elif action in TAPPED:
             self.out.tap(TAPPED[action])
         elif action in TAB_KEYS:   # Ctrl+PageUp/PageDown switches tabs in Firefox and Chrome
             self.out.combo(e.KEY_LEFTCTRL, TAB_KEYS[action])
@@ -208,8 +240,9 @@ class Engine:
             self.bridge.send({"type": "nav", "dir": direction})
 
     def release_all(self) -> None:
-        for code in self._held.values():
-            self.out.key(code, False)
+        for codes in self._held.values():
+            for code in reversed(codes):
+                self.out.key(code, False)
         self._held.clear()
         self._nav.clear()
         self._dpad_on.clear()

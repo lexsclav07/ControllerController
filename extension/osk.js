@@ -110,13 +110,13 @@
 
   CC.helpIsOpen = () => helpEl.classList.contains("open");
   CC.hideHelp = () => helpEl.classList.remove("open");
-  CC.showHelp = (bindings = {}) => {
+  CC.showHelp = (bindings = {}, labels = {}) => {
     CC.raise();
     const rows = [["Left stick / D-pad", "Move"], ["Right stick", "Scroll"]];
     for (const b of ORDER) {
       const a = bindings[b];
       if (!a || a === "none" || (b.startsWith("DPAD_") && DIRS.has(a))) continue;
-      rows.push([BUTTON_LABEL[b] ?? b, ACTION_LABEL[a] ?? String(a)]);
+      rows.push([BUTTON_LABEL[b] ?? b, labels?.[a] ?? ACTION_LABEL[a] ?? String(a)]);
     }
     helpEl.textContent = "";
     const title = document.createElement("h2");

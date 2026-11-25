@@ -38,7 +38,17 @@ Extension:
 | Guide | Force mouse mode on/off |
 | Right stick | Scroll |
 
-Only the button bindings are configurable. Open **ControllerController** from your app grid (or run `python -m controllercontroller settings`) to change what each button does; changes apply immediately, no restart. They are stored in `~/.config/controllercontroller/config.toml`, which only lists the buttons you changed, so new defaults still apply to the rest.
+Only the button bindings are configurable. Open **ControllerController** from your app grid (or run `~/.local/share/controllercontroller/venv/bin/python -m controllercontroller settings`) to change what each button does; changes apply immediately, no restart. They are stored in `~/.config/controllercontroller/config.toml`, which only lists the buttons you changed, so new defaults still apply to the rest.
+
+### Everything a button can do
+Pick a button in the settings window to get a searchable list (nothing below is bound by default):
+- **Playback**: mute, next/previous track, skip intro / ad / next episode, and YouTube's own hotkeys (captions, next/previous video, faster/slower, theater mode).
+- **Browser**: new / close / reopen tab, reload, forward, address bar, find, zoom, scroll, page up/down, top/bottom of page.
+- **Keyboard keys**: Enter, Escape, Space, Tab, Backspace, Delete, copy / cut / paste / select all / undo.
+- **System**: Activities overview, switch window, screenshot, lock screen, close window.
+- **Record a key**: press any key or combination (for example Ctrl+Shift+T) and the button types it. In `config.toml` that is `X = "key:ctrl+shift+t"`; modifiers are `ctrl`, `shift`, `alt`, `super`, and key names are the Linux names without `KEY_` (`f5`, `pagedown`, `enter`, ...). Power and sleep keys are refused.
+
+Arrow, page, home/end, backspace, delete and tab keys keep repeating while the button is held; everything else is a single press.
 
 ## Development
 ```bash

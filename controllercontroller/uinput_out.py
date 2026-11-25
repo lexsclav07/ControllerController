@@ -5,12 +5,13 @@ from __future__ import annotations
 from evdev import UInput
 from evdev import ecodes as e
 
-KEYS = [
-    e.KEY_UP, e.KEY_DOWN, e.KEY_LEFT, e.KEY_RIGHT, e.KEY_F, e.KEY_SLASH,
-    e.KEY_ESC, e.KEY_ENTER, e.KEY_VOLUMEUP, e.KEY_VOLUMEDOWN, e.KEY_MUTE,
-    e.KEY_PLAYPAUSE, e.KEY_SPACE, e.KEY_LEFTCTRL, e.KEY_PAGEUP, e.KEY_PAGEDOWN,
-    e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE, e.BTN_SIDE,
-]
+from .config import BLOCKED_KEYS, KEY_MAX
+
+# The whole keyboard range (bindings can type any key) plus the mouse buttons. Power/sleep keys are
+# left out so this device is never mistaken for a power button.
+KEYS = sorted(
+    (set(range(1, KEY_MAX + 1)) - BLOCKED_KEYS) | {e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE, e.BTN_SIDE}
+)
 REL = [e.REL_X, e.REL_Y, e.REL_WHEEL, e.REL_HWHEEL, e.REL_WHEEL_HI_RES, e.REL_HWHEEL_HI_RES]
 
 
@@ -51,6 +52,13 @@ class Output:
     def tap(self, code: int) -> None:
         self.key(code, True)
         self.key(code, False)
+
+    def chord(self, codes: tuple[int, ...]) -> None:
+        """Press the keys in order, then release them in reverse (modifiers first, the key last)."""
+        for code in codes:
+            self.key(code, True)
+        for code in reversed(codes):
+            self.key(code, False)
 
     def combo(self, modifier: int, code: int) -> None:
         """Tap `code` while `modifier` is held (e.g. Ctrl+PageDown)."""

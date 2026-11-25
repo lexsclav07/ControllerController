@@ -160,6 +160,22 @@ try:
     send(type="nav", dir="right")
     check("pad brings it back on the same key", (osk_idle(), keys_sel()), (False, sel_before))
     send(type="back")
+    # skip action: clicks a visible skip/next-episode button, otherwise says there is nothing to skip
+    toast = lambda: js("window.__cc.root.querySelector('.toast').textContent")
+    send(type="skip")
+    check("skip with nothing to skip says so", toast(), "Nothing to skip")
+    js("""window.skipped=0;const b=document.createElement('button');b.className='ytp-skip-ad-button';
+      b.textContent='Skip';b.style.cssText='position:fixed;left:10px;top:10px;width:90px;height:30px';
+      b.onclick=()=>window.skipped++;document.body.appendChild(b)""")
+    send(type="skip")
+    check("skip clicks the skip button", js("window.skipped"), 1)
+    js("document.querySelector('.ytp-skip-ad-button').remove()")
+    # the controls list uses the daemon's labels, so custom keys read properly
+    send(type="help", bindings={"X": "help", "Y": "key:ctrl+t", "LB": "refresh"},
+         labels={"help": "Show controls", "key:ctrl+t": "Key: Ctrl+T", "refresh": "Reload page"})
+    helptext = js("window.__cc.root.querySelector('.help').innerText")
+    check("help shows labels sent by the daemon", "Key: Ctrl+T" in helptext and "Reload page" in helptext, True)
+    send(type="help", bindings={})
     ws.close()
     print("\nFAILED:" if fails else "\nALL PASSED", fails or "")
     sys.exit(1 if fails else 0)

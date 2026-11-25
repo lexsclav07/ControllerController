@@ -17,6 +17,9 @@ class FakeOut:
     def combo(self, modifier, code):
         self.events.append(("combo", modifier, code))
 
+    def chord(self, codes):
+        self.events.append(("chord", tuple(codes)))
+
     def move(self, dx, dy):
         if dx or dy:
             self.events.append(("move", dx, dy))
@@ -323,3 +326,95 @@ def test_daemon_reloads_keybinds_in_place_when_file_changes(tmp_path):
     same_dict = bindings
     asyncio.run(scenario())
     assert bindings is same_dict and bindings["A"] == "back"
+
+
+# ---- extra bindable actions: keys, shortcuts, features ---------------------
+
+def test_new_actions_are_all_unbound_by_default_and_groups_cover_every_action():
+    new = set(config.ACTIONS) - {"select", "context", "back", "up", "down", "left", "right", "seek_back",
+                                 "seek_fwd", "vol_up", "vol_down", "play_pause", "fullscreen", "search",
+                                 "osk", "help", "toggle_mode", "tab_prev", "tab_next", "none"}
+    assert new and not new & set(config.DEFAULT_BINDINGS.values())
+    grouped = [a for _, actions in config.ACTION_GROUPS for a in actions]
+    assert sorted(grouped + ["none"]) == sorted(config.ACTIONS) and len(grouped) == len(set(grouped))
+    assert set(config.SHORTCUTS) <= set(config.ACTIONS)
+    for name, (_label, combo) in config.SHORTCUTS.items():
+        assert config.combo_codes(combo), (name, combo)
+
+
+def test_key_combos_parse_and_reject_bad_or_dangerous_keys():
+    assert config.key_codes("key:ctrl+shift+t") == (e.KEY_LEFTCTRL, e.KEY_LEFTSHIFT, e.KEY_T)
+    assert config.key_codes("key:Control+PgDn") == (e.KEY_LEFTCTRL, e.KEY_PAGEDOWN)
+    assert config.key_codes("key:f5") == (e.KEY_F5,)
+    assert config.key_codes("overview") == (e.KEY_LEFTMETA,)
+    for bad in ("key:", "key:ctrl+", "key:nonsense", "key:power", "key:sleep", "key:ctrl+alt+bogus", "refresh_typo"):
+        assert config.key_codes(bad) is None, bad
+    assert config.action_label("key:ctrl+shift+t") == "Key: Ctrl+Shift+T"
+    assert config.action_label("zoom_in") == "Zoom in"
+    assert config.combo_from_event(e.KEY_T, ctrl=True, shift=True) == "ctrl+shift+t"
+    assert config.combo_from_event(e.KEY_LEFTSHIFT) is None and config.combo_from_event(e.KEY_POWER) is None
+
+
+def test_config_accepts_custom_keys_and_drops_bad_ones(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text('[bindings]\nX = "key:ctrl+t"\nY = "key:bogus"\nLB = "refresh"\n')
+    b = config.load_bindings(p)
+    assert b["X"] == "key:ctrl+t" and b["Y"] == "search" and b["LB"] == "refresh"
+    config.save_bindings(b, p)
+    assert config.load_bindings(p) == b
+
+
+def test_bound_key_taps_and_modifier_combos_chord():
+    eng, out, bridge = make_browser()
+    eng.bindings.update(X="key:ctrl+shift+t", Y="refresh", LB="captions")
+    for b in ("X", "Y", "LB"):
+        eng.button(b, True); eng.button(b, False)
+    assert out.events == [("chord", (e.KEY_LEFTCTRL, e.KEY_LEFTSHIFT, e.KEY_T)),
+                          ("chord", (e.KEY_F5,)), ("chord", (e.KEY_C,))]
+    assert [m for m in bridge.sent if m["type"] != "ctl"] == []
+    assert bridge.sent.count({"type": "ctl"}) == 3   # every key we press is announced to the page
+
+
+def test_navigation_keys_hold_and_repeat_until_released():
+    eng, out, _ = make_browser()
+    eng.bindings["X"] = "page_down"
+    eng.button("X", True)
+    assert out.events == [("key", e.KEY_PAGEDOWN, True)]
+    eng.button("X", False)
+    assert out.events[-1] == ("key", e.KEY_PAGEDOWN, False)
+    eng.bindings["Y"] = "key:shift+tab"       # held modifier is released after the key
+    out.events.clear()
+    eng.button("Y", True); eng.button("Y", False)
+    assert out.events == [("key", e.KEY_LEFTSHIFT, True), ("key", e.KEY_TAB, True),
+                          ("key", e.KEY_TAB, False), ("key", e.KEY_LEFTSHIFT, False)]
+    out.events.clear()
+    eng.button("Y", True); eng.release_all()   # pad drops off mid-press: nothing stays stuck down
+    assert out.events[-2:] == [("key", e.KEY_TAB, False), ("key", e.KEY_LEFTSHIFT, False)]
+
+
+def test_site_hotkeys_are_skipped_while_typing_but_explicit_keys_are_not():
+    eng, out, bridge = make_browser()
+    bridge.typing = True
+    eng.bindings.update(X="captions", Y="space", LB="key:a")
+    for b in ("X", "Y", "LB"):
+        eng.button(b, True); eng.button(b, False)
+    assert out.events == [("chord", (e.KEY_SPACE,)), ("chord", (e.KEY_A,))]
+
+
+def test_scroll_buttons_and_skip():
+    eng, out, bridge = make_browser()
+    eng.bindings.update(X="scroll_down", Y="scroll_up", LB="skip")
+    eng.button("X", True); eng.button("Y", True); eng.button("LB", True)
+    assert out.events == [("scroll", 0, -360), ("scroll", 0, 360)]
+    assert {"type": "skip"} in bridge.sent
+    eng, out, bridge = make_browser(active=False)   # skip is a page feature: nothing to do in mouse mode
+    eng.bindings["LB"] = "skip"
+    eng.button("LB", True)
+    assert out.events == [] and bridge.sent == []
+
+
+def test_help_message_carries_labels_for_custom_keys():
+    eng, _, bridge = make_browser()
+    eng.bindings["X"] = "help"; eng.bindings["Y"] = "key:ctrl+t"
+    eng.button("X", True)
+    assert bridge.sent[0]["labels"]["key:ctrl+t"] == "Key: Ctrl+T" and bridge.sent[0]["labels"]["help"] == "Show controls"
