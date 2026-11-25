@@ -41,6 +41,11 @@ class Bridge:
         return any(self._clients.values())
 
     @property
+    def connected(self) -> bool:
+        """True when any browser extension is connected (focused or not)."""
+        return bool(self._clients)
+
+    @property
     def typing(self) -> bool:
         """True when the focused browser has a text field focused (so stray keys would be typed)."""
         return any(self._typing.get(ws) for ws, focused in self._clients.items() if focused)

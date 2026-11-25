@@ -50,6 +50,13 @@ Pick a button in the settings window to get a searchable list (nothing below is 
 
 Arrow, page, home/end, backspace, delete and tab keys keep repeating while the button is held; everything else is a single press.
 
+## Live controller view
+See exactly what the daemon gets from the pad, in the app and in a terminal (handy for checking stick drift, a sticky button or which action a press triggers):
+- **In the app**: open ControllerController and switch to the **Live input** tab. A drawn controller lights up as you press things, the sticks and triggers move, and the last few presses show the action they ran.
+- **In a terminal**: `controllercontroller monitor` shows a live screen (sticks, triggers, held buttons, recent presses). `controllercontroller monitor --log` prints one line per press instead, and `--json` prints the daemon's raw messages.
+
+`controllercontroller` on its own opens the settings window. Both views read a user-only socket at `$XDG_RUNTIME_DIR/controllercontroller.sock`, so they need the daemon running, and web pages cannot reach it. Stick values are raw (before the deadzone), with up as negative.
+
 ## Development
 ```bash
 python -m venv .venv && .venv/bin/pip install -e '.[dev]'

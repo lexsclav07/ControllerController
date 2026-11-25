@@ -13,6 +13,10 @@ cp "$here/packaging/controllercontroller.service" "$HOME/.config/systemd/user/"
 mkdir -p "$HOME/.local/share/applications"
 sed "s|@PYTHON@|$dest/venv/bin/python|" "$here/packaging/io.github.lexsclav07.ControllerController.desktop" \
   > "$HOME/.local/share/applications/io.github.lexsclav07.ControllerController.desktop"
+# `controllercontroller` command: settings window by default, `controllercontroller monitor` for the live view.
+mkdir -p "$HOME/.local/bin"
+printf '#!/bin/sh\n[ $# -eq 0 ] && set -- settings\nexec "%s/venv/bin/python" -m controllercontroller "$@"\n' "$dest" > "$HOME/.local/bin/controllercontroller"
+chmod +x "$HOME/.local/bin/controllercontroller"
 systemctl --user daemon-reload
 systemctl --user enable controllercontroller.service
 systemctl --user restart controllercontroller.service   # picks up updates; `enable --now` would leave an old daemon running
@@ -25,5 +29,6 @@ if [ ! -w /dev/uinput ]; then
 else
   echo "Daemon installed and running (it also starts on login)."
 fi
-echo "Change buttons any time from the ControllerController app (or: $dest/venv/bin/python -m controllercontroller settings)."
+echo "Change buttons any time from the ControllerController app (or run: controllercontroller)."
+echo "Watch the controller live in a terminal with: controllercontroller monitor"
 echo "Next: load the browser extension from $here/extension (see README, 'Install')."

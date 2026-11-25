@@ -68,12 +68,16 @@ async def run(engine: Engine) -> None:
                 await asyncio.sleep(2)
                 continue
             log.info("controller connected: %s", dev.name)
+            if engine.monitor:
+                engine.monitor.set_pad(dev.name)
             try:
                 await _stream(dev, engine)
             except OSError:
                 log.info("controller disconnected")
             finally:
                 engine.release_all()
+                if engine.monitor:
+                    engine.monitor.set_pad(None)
                 dev.close()
     finally:
         ticker.cancel()

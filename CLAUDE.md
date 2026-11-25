@@ -11,6 +11,7 @@ Linux app (Fedora/GNOME Wayland) that lets an Xbox controller drive the PC from 
 .venv/bin/pytest tests/test_engine.py -k nav       # single test
 .venv/bin/python -W ignore tests/browser/run.py    # headless-Chrome smoke test of extension/*.js
 .venv/bin/python -m controllercontroller           # run the daemon (needs write access to /dev/uinput)
+controllercontroller monitor                       # live pad view in the terminal (--log / --json); the installer puts `controllercontroller` in ~/.local/bin
 ~/.local/share/controllercontroller/venv/bin/python -m controllercontroller settings   # keybind window (GTK4/libadwaita; needs system python3-gobject + evdev, so use the installed venv, not .venv)
 ```
 
@@ -26,5 +27,6 @@ Linux app (Fedora/GNOME Wayland) that lets an Xbox controller drive the PC from 
 - Keyboard/mouse hand-off: trusted `keydown`/`mousedown`/real `mousemove` in the page set `idle` (box and OSK selection hidden) in `content.js`. The daemon's own injected keys look identical, so `Engine._fire` sends a `ctl` message first and `content.js` ignores input within `CTL_WINDOW` of any daemon message or `sendKey` (either order). The first nav/select while idle only reveals the box.
 - On native links/buttons `content.select()` focuses the element and asks the daemon for a real Enter key (trusted user activation); only div-style targets get synthetic events.
 - `media.seek` needs `--` before negative offsets (busctl parses them as options); media calls return False on failure so the engine can fall back to key presses.
+- Live view: `monitor.py` is both ends. `Monitor` (daemon) streams JSON lines over a 0600 Unix socket in `$XDG_RUNTIME_DIR`; the Engine feeds it (`button` events with action/mode, raw axes via `RAW_AXES`) and `controller.run` reports the pad name. Clients are `Dashboard`/`cli` (terminal: `controllercontroller monitor [--json|--log]`) and `live.py` (the settings window's Live input page, a cairo `ControllerView` fed by `Feed` on the GLib loop). The protocol is in the `monitor.py` docstring; a failing socket must never take the daemon down.
 - Overlay UI lives in `extension/osk.js` (popover top layer so modal dialogs cannot cover it; styling uses libadwaita tokens and the `AccentColor` system colour).
 - `tests/browser/run.py` stubs `chrome.runtime` and injects the content scripts into headless Chrome via CDP, because branded Chrome >=137 ignores `--load-extension`.

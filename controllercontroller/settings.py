@@ -11,6 +11,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gtk  # noqa: E402
 
+from .live import LivePage  # noqa: E402
 from .config import (  # noqa: E402
     ACTION_GROUPS, BUTTON_LABELS, DEFAULT_BINDINGS, SHORTCUTS, action_label, combo_from_event, combo_label,
     config_path, load_bindings, save_bindings,
@@ -97,6 +98,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         reset = Gtk.Button(icon_name="edit-undo-symbolic", tooltip_text="Restore default controls")
         reset.connect("clicked", self._confirm_reset)
         header.pack_start(reset)
+        self.stack = Adw.ViewStack()
+        header.set_title_widget(Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE))
         view.add_top_bar(header)
 
         page = Adw.PreferencesPage()
@@ -119,7 +122,17 @@ class SettingsWindow(Adw.ApplicationWindow):
         page.add(fixed)
         self._refresh()
 
-        view.set_content(page)
+        self.stack.add_titled_with_icon(page, "controls", "Controls", "input-gaming-symbolic")
+        self.live = LivePage()
+        live_scroll = Gtk.ScrolledWindow(child=Adw.Clamp(maximum_size=640, child=self.live))
+        self.stack.add_titled_with_icon(live_scroll, "live", "Live input", "utilities-system-monitor-symbolic")
+        # The undo button only makes sense on the controls page.
+        self.stack.connect("notify::visible-child-name",
+                           lambda *_: reset.set_visible(self.stack.get_visible_child_name() == "controls"))
+        self.connect("close-request", lambda *_: self.live.stop() or False)
+        self.live.start()
+
+        view.set_content(self.stack)
         self.toasts.set_child(view)
         self.set_content(self.toasts)
 

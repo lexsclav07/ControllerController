@@ -31,6 +31,9 @@ HELD = {
     "vol_up": e.KEY_VOLUMEUP, "vol_down": e.KEY_VOLUMEDOWN,
 }
 DIRS = ("up", "down", "left", "right")
+# Axis code -> (name in the live feed, centred?): sticks run -1..1, triggers 0..1.
+RAW_AXES = {e.ABS_X: ("lx", True), e.ABS_Y: ("ly", True), e.ABS_RX: ("rx", True), e.ABS_RY: ("ry", True),
+            e.ABS_Z: ("lt", False), e.ABS_RZ: ("rt", False)}
 NAV_THRESHOLD = 0.25      # curved stick value that counts as a "push"
 NAV_FIRST_REPEAT = 0.40   # seconds before a held direction starts repeating
 NAV_REPEAT = 0.15
@@ -64,12 +67,14 @@ def _background(fn: Callable, *args) -> None:
 
 class Engine:
     def __init__(self, out, bindings: dict[str, str], media=default_media,
-                 bg: Callable = _background, bridge=None) -> None:
+                 bg: Callable = _background, bridge=None, monitor=None) -> None:
         self.out = out
         self.bindings = bindings
         self.media = media
         self.bg = bg
         self.bridge = bridge
+        self.monitor = monitor   # optional live-input feed (monitor.Monitor)
+        self.raw = dict.fromkeys(("lx", "ly", "rx", "ry", "lt", "rt"), 0.0)   # un-curved pad state for it
         self.force_mouse = False
         self.sticks = {"lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0}
         self._frac = {"px": 0.0, "py": 0.0, "sx": 0.0, "sy": 0.0}
@@ -85,6 +90,10 @@ class Engine:
     def browser_mode(self) -> bool:
         return bool(self.bridge and self.bridge.active and not self.force_mouse)
 
+    @property
+    def mode_name(self) -> str:
+        return "browser" if self.browser_mode else "mouse"
+
     def ext_key(self, name: str) -> None:
         """A key the extension asked for (arrow keys while a video is fullscreen)."""
         if name in EXT_KEYS:
@@ -93,6 +102,8 @@ class Engine:
     # -- input ---------------------------------------------------------
     def button(self, name: str, pressed: bool) -> None:
         action = self.bindings.get(name, "none")
+        if self.monitor:
+            self.monitor.button(name, pressed, action, self.mode_name)
         if not pressed:
             if self._nav.pop(name, None) is None:
                 for code in reversed(self._held.pop(name, ())):
@@ -178,6 +189,11 @@ class Engine:
             self.out.tap(fallback_key)
 
     def abs_event(self, code: int, value: int, lo: int, hi: int) -> None:
+        if self.monitor and code in RAW_AXES:
+            mid, half = (lo + hi) / 2, (hi - lo) / 2 or 1
+            raw = (value - mid) / half if RAW_AXES[code][1] else (value - lo) / (hi - lo or 1)
+            self.raw[RAW_AXES[code][0]] = max(-1.0, min(1.0, raw))
+            self.monitor.axes(self.raw)
         if code in (e.ABS_X, e.ABS_Y, e.ABS_RX, e.ABS_RY):
             key = {e.ABS_X: "lx", e.ABS_Y: "ly", e.ABS_RX: "rx", e.ABS_RY: "ry"}[code]
             self.sticks[key] = axis(value, lo, hi)
