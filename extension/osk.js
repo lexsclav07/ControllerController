@@ -39,6 +39,9 @@
     .key.on{background:color-mix(in srgb,var(--accent-bg) 35%,transparent)}   /* shift latched */
     .key.sel{background:var(--accent-bg);color:var(--accent-fg)}              /* controller selection */
     .key.hit{transform:scale(.93)}
+    /* Keyboard or mouse took over: no controller selection until the pad is touched again. */
+    .osk.idle .key.sel{background:color-mix(in srgb,currentColor 10%,transparent);color:inherit}
+    .osk.idle .key.sel.on{background:color-mix(in srgb,var(--accent-bg) 35%,transparent)}
     .ic{width:1.2em;height:1.2em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
     .ic.f{fill:currentColor}
     /* Focus ring: accent + white keyline so it reads on white, black and photographic pages. */
@@ -273,6 +276,8 @@
     }
   }
 
+  function setIdle(on) { oskEl.classList.toggle("idle", on); }
+
   function openFor(el) {
     if (open || !isEditable(el)) return;
     CC.raise();
@@ -303,6 +308,6 @@
     CC.onOskClose?.(el);
   }
 
-  CC.osk = { isEditable, open: openFor, close, mark, isOpen: () => open,
+  CC.osk = { isEditable, open: openFor, close, mark, setIdle, isOpen: () => open,
     keys: () => [...oskEl.querySelectorAll(".key")] };
 })();

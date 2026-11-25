@@ -29,6 +29,10 @@
   let cur = null;              // element with the focus box
   let pageCur = null;          // page element to return to when the OSK closes
   let controllerMode = false;  // true once the controller has driven this page
+  let idle = false;            // keyboard/mouse took over: no focus box until the controller is used again
+  let lastCtl = 0;             // last time the controller itself did something (message or key it asked for)
+  let lastMouse = null;
+  const CTL_WINDOW = 250;      // ms; the daemon's own key presses land this close to its "ctl" message
   let paused = false;          // true while the daemon is in forced mouse mode
   let lastScrollRetry = 0;
   let lastEscape = { el: null, at: 0 };
@@ -49,7 +53,40 @@
   addEventListener("blur", () => setTimeout(reportFocus, 0));
   addEventListener("pageshow", reportFocus);   // back/forward cache restores
   document.addEventListener("visibilitychange", () => { reportFocus(); if (cur && !paused) track(); });
-  addEventListener("mousemove", (e) => { if (e.isTrusted) controllerMode = false; }, true);
+
+  // ---- hand-off: real keyboard / mouse input hides the box until the controller is used again ----
+  const markCtl = () => { lastCtl = performance.now(); };
+  function takeOver() {
+    controllerMode = false;
+    if (idle) return;
+    idle = true;
+    box.style.display = "none";
+    osk.setIdle(true);
+  }
+  function wake() {
+    if (!idle) return;
+    idle = false;
+    osk.setIdle(false);
+    if (cur && !paused) track();
+  }
+  // The daemon's own key presses are trusted events too; they arrive within a moment of a "ctl"
+  // message (or of a key we asked for), in either order, so only input outside that window counts.
+  function userInput() {
+    const t = performance.now();
+    if (Math.abs(t - lastCtl) < CTL_WINDOW) return;
+    setTimeout(() => { if (lastCtl < t - CTL_WINDOW) takeOver(); }, CTL_WINDOW);
+  }
+  addEventListener("mousemove", (e) => {
+    if (!e.isTrusted) return;
+    // Browsers repeat the old position after a scroll or layout change; only real motion counts.
+    const moved = lastMouse ? Math.hypot(e.screenX - lastMouse.x, e.screenY - lastMouse.y)
+      : Math.hypot(e.movementX || 0, e.movementY || 0);
+    lastMouse = { x: e.screenX, y: e.screenY };
+    if (moved >= 2) takeOver();
+  }, { capture: true, passive: true });
+  for (const type of ["mousedown", "keydown"]) {
+    addEventListener(type, (e) => { if (e.isTrusted) userInput(); }, { capture: true, passive: true });
+  }
   document.addEventListener("focusin", (e) => {
     if (osk.isEditable(e.target)) send({ type: "typing", value: true });
   }, true);
@@ -181,7 +218,7 @@
     cur = el;
     osk.mark(el);
     paused = false;
-    if (!el) { box.style.display = "none"; return; }
+    if (!el || idle) { box.style.display = "none"; return; }
     CC.raise();
     if (osk.keys().includes(el)) {   // keyboard keys show their own selected state, no floating ring
       box.style.display = "none";
@@ -227,7 +264,7 @@
     tracking = true;
     let n = 0;
     const frame = () => {
-      if (!cur || !cur.isConnected || paused || !document.hasFocus() || osk.keys().includes(cur)) {
+      if (!cur || !cur.isConnected || paused || idle || !document.hasFocus() || osk.keys().includes(cur)) {
         if (!osk.keys().includes(cur)) box.style.display = "none";
         tracking = false;
         return;
@@ -250,6 +287,7 @@
   const playerMode = () => !!document.fullscreenElement && !osk.isOpen();
 
   function sendKey(key) {
+    markCtl();
     // A focused text field would swallow the daemon's real key presses.
     const a = document.activeElement;
     if (key !== "slash" && a && osk.isEditable(a)) a.blur();
@@ -383,10 +421,27 @@
     }
   }, true);
 
+  // First controller press after keyboard/mouse use: bring the box back to where it was
+  // (or the middle of the page) instead of moving or clicking on something the user can't see.
+  function reveal() {
+    controllerMode = true;
+    const cands = osk.isOpen() ? osk.keys() : collect();
+    if (osk.isOpen()) return setCursor(cands.includes(cur) ? cur : cands[0]);
+    setCursor(lost() ? nearestToCenter(cands) ?? cands[0] ?? null : cur);
+  }
+
   api.runtime.onMessage.addListener((msg) => {
+    if (msg.type === "report") return reportFocus();
+    markCtl();   // whatever key presses follow are the controller's, not the user's keyboard
+    if (msg.type === "ctl") return;
     if (msg.type === "help") return CC.helpIsOpen() ? CC.hideHelp() : CC.showHelp(msg.bindings);
     // While the controls list is up, any button just dismisses it (sticks are ignored).
-    if (CC.helpIsOpen() && !["report", "mode", "nav"].includes(msg.type)) return CC.hideHelp();
+    if (CC.helpIsOpen() && !["mode", "nav"].includes(msg.type)) return CC.hideHelp();
+    if (idle) {
+      const blind = (msg.type === "nav" || msg.type === "select") && !playerMode();
+      wake();
+      if (blind) return reveal();
+    }
     switch (msg.type) {
       case "nav": return nav(msg.dir);
       case "select": return select();
@@ -403,7 +458,6 @@
         if (msg.mouse) { paused = true; controllerMode = false; box.style.display = "none"; }
         else if (!osk.isOpen()) setCursor(lost() ? nearestToCenter(collect()) : cur);
         return;
-      case "report": return reportFocus();
     }
   });
 })();

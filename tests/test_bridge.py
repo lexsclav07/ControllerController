@@ -71,10 +71,12 @@ def test_actions_only_reach_the_focused_browser_and_typing_is_tracked():
             await asyncio.sleep(0.1)
             assert b.typing
             b.send({"type": "nav", "dir": "down"})
+            b.send({"type": "ctl"})
             b.send({"type": "ping"})
             assert json.loads(await focused.recv())["type"] == "nav"
+            assert json.loads(await focused.recv())["type"] == "ctl"
             assert json.loads(await focused.recv())["type"] == "ping"
-            # the unfocused browser must not receive the nav, only the ping
+            # the unfocused browser must not receive the nav or ctl, only the ping
             assert json.loads(await asyncio.wait_for(other.recv(), 1))["type"] == "ping"
             await focused.send(json.dumps({"type": "typing", "value": False}))
             await asyncio.sleep(0.1)

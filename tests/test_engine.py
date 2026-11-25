@@ -236,6 +236,17 @@ def test_typing_blocks_stray_keys_but_not_media_calls():
     assert out.events == [("tap", e.KEY_F)]
 
 
+def test_daemon_key_presses_are_announced_to_the_extension_first():
+    # The page can't tell the pad's injected keys from the real keyboard; "ctl" lets it keep the focus box.
+    eng, out, bridge = make_browser()
+    eng.button("SELECT", True)   # fullscreen -> "f"
+    assert bridge.sent == [{"type": "ctl"}] and out.events == [("tap", e.KEY_F)]
+    bridge.sent.clear()
+    bridge.typing = True         # suppressed key: nothing injected, nothing announced
+    eng.button("SELECT", True)
+    assert bridge.sent == []
+
+
 def test_search_goes_to_extension_in_browser_mode_and_slash_otherwise():
     eng, out, bridge = make_browser()
     eng.button("Y", True)

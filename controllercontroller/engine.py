@@ -124,6 +124,8 @@ class Engine:
         # While a text field has focus, a stray "f" or space would be typed into it.
         if action in ("fullscreen", "search") and self._typing():
             return
+        if self.bridge:   # the key presses below must not look like the user's keyboard to the page
+            self.bridge.send({"type": "ctl"})
         if action in TAPPED:
             self.out.tap(TAPPED[action])
         elif action in TAB_KEYS:   # Ctrl+PageUp/PageDown switches tabs in Firefox and Chrome

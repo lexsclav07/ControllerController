@@ -2,6 +2,8 @@
 
 daemon -> extension: {"type": "nav", "dir": ...} | select | back | osk | search | {"type": "mode", "mouse": bool}
                      | {"type": "help", "bindings": {BUTTON: action}}
+                     | {"type": "ctl"}   the daemon is about to press a key itself (so the page can tell it
+                                         from the user's keyboard and keep the focus box)
                      (delivered only to the focused browser), plus "report" and "ping" (to everyone)
 extension -> daemon: {"type": "active", "value": bool}   browser window focused
                      {"type": "typing", "value": bool}   a text field has focus
@@ -21,7 +23,7 @@ log = logging.getLogger(__name__)
 HOST, PORT = "127.0.0.1", 8765
 ALLOWED_ORIGIN_PREFIXES = ("moz-extension://", "chrome-extension://")
 # Messages that act on the page; they must only reach the browser the user is looking at.
-ACTION_TYPES = {"nav", "select", "back", "osk", "search", "mode", "help"}
+ACTION_TYPES = {"nav", "select", "back", "osk", "search", "mode", "help", "ctl"}
 
 
 class Bridge:
