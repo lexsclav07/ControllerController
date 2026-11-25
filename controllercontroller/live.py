@@ -300,7 +300,8 @@ class LivePage(Gtk.Box):
         elif not pad:
             self.status.set_label("No controller connected")
         else:
-            mode = "Browser mode" if msg.get("mode") == "browser" else "Mouse mode"
+            mode = {"browser": "Browser mode", "game": "Game running, pad left to the game"}.get(
+                msg.get("mode"), "Mouse mode")
             paused = " · Controls paused" if msg.get("paused") else ""
             self.status.set_label(f"{pad} · {mode}{paused}")
 

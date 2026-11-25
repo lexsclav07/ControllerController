@@ -6,6 +6,7 @@ from .bridge import Bridge
 from .config import load_bindings, watch
 from .controller import run
 from .engine import Engine
+from .games import watch_games
 from .monitor import Monitor, cli as monitor_cli
 from .uinput_out import Output
 
@@ -18,7 +19,8 @@ async def _main(out: Output) -> None:
     bridge.on_key = engine.ext_key
     monitor.status_fn = lambda: {"mode": engine.mode_name, "extension": bridge.connected, "paused": engine.paused}
     monitor.on_pause = engine.set_paused
-    await asyncio.gather(run(engine), bridge.serve(), watch(bindings), monitor.serve())
+    await asyncio.gather(run(engine), bridge.serve(), watch(bindings), monitor.serve(),
+                         watch_games(engine.set_game))
 
 
 def main() -> None:

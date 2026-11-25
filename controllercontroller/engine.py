@@ -77,6 +77,8 @@ class Engine:
         self.raw = dict.fromkeys(("lx", "ly", "rx", "ry", "lt", "rt"), 0.0)   # un-curved pad state for it
         self.force_mouse = False
         self.paused = False       # the settings window / monitor asked us to ignore the pad for now
+        self.game: str | None = None   # a running game, which reads the pad itself
+        self._ignoring = False
         self.sticks = {"lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0}
         self._frac = {"px": 0.0, "py": 0.0, "sx": 0.0, "sy": 0.0}
         self._held: dict[str, tuple[int, ...]] = {}   # button -> key codes currently held down
@@ -92,16 +94,36 @@ class Engine:
         return bool(self.bridge and self.bridge.active and not self.force_mouse)
 
     @property
+    def standing_down(self) -> bool:
+        """A game is running and the browser isn't in front: the pad belongs to the game."""
+        return bool(self.game and not (self.bridge and self.bridge.active))
+
+    @property
     def mode_name(self) -> str:
+        if self.standing_down:
+            return "game"
         return "browser" if self.browser_mode else "mouse"
 
     def set_paused(self, value: bool) -> None:
-        """Stop the pad from doing anything (the live view still sees it). Held keys are let go."""
-        if value == self.paused:
-            return
-        self.paused = value
-        log.info("controls %s", "paused" if value else "resumed")
-        if value:
+        """Stop the pad from doing anything (the live view still sees it)."""
+        if value != self.paused:
+            self.paused = value
+            log.info("controls %s", "paused" if value else "resumed")
+            self._sync()
+
+    def set_game(self, app: str | None) -> None:
+        if app != self.game:
+            self.game = app
+            log.info("game running (Steam app %s): leaving the pad to it" % app if app else "game closed")
+            self._sync()
+
+    def _sync(self) -> bool:
+        """True while the pad must do nothing. Lets go of held keys on the way in."""
+        ignoring = self.paused or self.standing_down
+        if ignoring == self._ignoring:
+            return ignoring
+        self._ignoring = ignoring
+        if ignoring:
             for codes in self._held.values():
                 for code in reversed(codes):
                     self.out.key(code, False)
@@ -111,18 +133,20 @@ class Engine:
         else:   # a stick that is still held when we resume must not fire a fresh nav step
             self._nav_dir = self._stick_dir()
             self._nav_next = self._clock + NAV_FIRST_REPEAT
+        return ignoring
 
     def ext_key(self, name: str) -> None:
         """A key the extension asked for (arrow keys while a video is fullscreen)."""
-        if name in EXT_KEYS and not self.paused:
+        if name in EXT_KEYS and not self._sync():
             self.out.tap(EXT_KEYS[name])
 
     # -- input ---------------------------------------------------------
     def button(self, name: str, pressed: bool) -> None:
         action = self.bindings.get(name, "none")
+        ignoring = self._sync()
         if self.monitor:
             self.monitor.button(name, pressed, action, "paused" if self.paused else self.mode_name)
-        if self.paused:
+        if ignoring:
             return
         if not pressed:
             if self._nav.pop(name, None) is None:
@@ -237,7 +261,7 @@ class Engine:
     # -- continuous output (call at ~120 Hz) -----------------------------
     def tick(self, dt: float) -> None:
         self._clock += dt
-        if self.paused:
+        if self._sync():
             return
         s, f = self.sticks, self._frac
         if self.browser_mode:

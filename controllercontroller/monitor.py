@@ -4,11 +4,11 @@ The daemon listens on a user-only Unix socket ($XDG_RUNTIME_DIR/controllercontro
 newline-delimited JSON to whoever connects: the settings window's "Live input" page and the
 `controllercontroller monitor` command. Nothing here reaches the browser; web pages cannot open it.
 
-  {"t": "hello",  "pad": str|null, "mode": "browser"|"mouse", "extension": bool, "paused": bool,
+  {"t": "hello",  "pad": str|null, "mode": "browser"|"mouse"|"game", "extension": bool, "paused": bool,
                   "axes": {...}, "down": [button, ...]}                       on connect
   {"t": "status", "pad": ..., "mode": ..., "extension": bool, "paused": bool} when any of them changes
   {"t": "button", "name": "A", "pressed": bool, "action": "select", "label": "Select / click",
-                  "mode": "browser"|"mouse"|"paused", "ts": float}            every press and release
+                  "mode": "browser"|"mouse"|"game"|"paused", "ts": float}            every press and release
   {"t": "axes",   "lx", "ly", "rx", "ry": -1..1, "lt", "rt": 0..1}            up to 30 per second
 
 client -> daemon: {"t": "pause", "value": bool}   ignore the pad while true (the buttons above still stream).
@@ -219,6 +219,7 @@ class Dashboard:
             f"  Controller: {pad}",
             f"  Mode: {s.get('mode', '?')}    Browser extension: {'connected' if s.get('extension') else 'not connected'}",
             *([style("  Controls paused: presses are shown but do nothing", "33")] if s.get("paused") else []),
+            *([style("  Game running: the pad is left to the game", "33")] if s.get("mode") == "game" else []),
             "",
         ]
         for name, kx, ky in (("Left stick ", "lx", "ly"), ("Right stick", "rx", "ry")):

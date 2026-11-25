@@ -465,3 +465,40 @@ def test_stick_held_through_a_pause_does_not_fire_a_fresh_nav_step():
     eng.set_paused(False)
     eng.tick(0.05)
     assert bridge.sent == []
+
+
+# ---- games read the pad themselves ---------------------------------------
+def test_running_game_gets_no_keyboard_or_mouse_from_the_pad():
+    eng, out, media = make()
+    eng.set_game("400")
+    for name in ("A", "B", "LT", "START", "GUIDE"):
+        eng.button(name, True)
+        eng.button(name, False)
+    eng.sticks.update(lx=1.0, ry=1.0)
+    eng.tick(0.1)
+    assert out.events == [] and media.calls == [] and not eng.force_mouse
+    assert eng.mode_name == "game"
+
+
+def test_game_start_releases_held_keys_and_closing_it_restores_controls():
+    eng, out, _ = make()
+    eng.button("A", True)
+    eng.set_game("400")
+    assert out.events == [("key", e.BTN_LEFT, True), ("key", e.BTN_LEFT, False)]
+    eng.button("A", False)
+    eng.set_game(None)
+    out.events.clear()
+    eng.button("B", True)
+    assert out.events == [("tap", e.BTN_SIDE)] and eng.mode_name == "mouse"
+
+
+def test_focused_browser_still_works_while_a_game_runs():
+    eng, _, bridge = make_browser(active=True)
+    eng.set_game("400")
+    eng.button("A", True)
+    assert eng.mode_name == "browser" and {"type": "select"} in bridge.sent
+    bridge.active = False   # back to the game
+    eng.button("A", False)
+    bridge.sent.clear()
+    eng.button("A", True)
+    assert eng.mode_name == "game" and bridge.sent == []
