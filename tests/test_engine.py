@@ -418,3 +418,50 @@ def test_help_message_carries_labels_for_custom_keys():
     eng.bindings["X"] = "help"; eng.bindings["Y"] = "key:ctrl+t"
     eng.button("X", True)
     assert bridge.sent[0]["labels"]["key:ctrl+t"] == "Key: Ctrl+T" and bridge.sent[0]["labels"]["help"] == "Show controls"
+
+
+# ---- pause (settings window in front) ------------------------------------
+
+def test_paused_pad_does_nothing_but_the_live_view_still_sees_it():
+    class FakeMonitor:
+        buttons, axes_seen = [], []
+
+        def button(self, *args): self.buttons.append(args)
+        def axes(self, values): self.axes_seen.append(dict(values))
+
+    eng, out, bridge = make_browser()
+    eng.monitor = FakeMonitor()
+    eng.set_paused(True)
+    eng.button("RT", True)                      # volume up
+    eng.button("A", True); eng.button("A", False)
+    eng.button("GUIDE", True)                   # must not flip mouse mode either
+    eng.abs_event(e.ABS_X, 32767, -32768, 32767)
+    eng.abs_event(e.ABS_RY, 32767, -32768, 32767)
+    eng.tick(0.5)
+    eng.ext_key("left")
+    assert out.events == [] and bridge.sent == [] and not eng.force_mouse
+    assert [m[3] for m in eng.monitor.buttons] == ["paused"] * 4
+    assert eng.monitor.axes_seen[-1]["lx"] == 1.0   # sticks are still reported raw
+
+
+def test_resuming_works_again_and_pausing_lets_go_of_held_keys():
+    eng, out, bridge = make_browser(active=False)    # mouse mode: A is a held mouse button
+    eng.button("A", True)
+    eng.set_paused(True)
+    assert out.events == [("key", e.BTN_LEFT, True), ("key", e.BTN_LEFT, False)]
+    out.events.clear()
+    eng.button("A", False)                           # the release that arrives while paused is a no-op
+    assert out.events == []
+    eng.set_paused(False)
+    eng.button("RT", True)
+    assert ("key", e.KEY_VOLUMEUP, True) in out.events
+
+
+def test_stick_held_through_a_pause_does_not_fire_a_fresh_nav_step():
+    eng, out, bridge = make_browser()
+    eng.set_paused(True)
+    eng.abs_event(e.ABS_X, 32767, -32768, 32767)
+    eng.tick(0.1)
+    eng.set_paused(False)
+    eng.tick(0.05)
+    assert bridge.sent == []

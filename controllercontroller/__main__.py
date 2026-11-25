@@ -16,7 +16,8 @@ async def _main(out: Output) -> None:
     monitor = Monitor()
     engine = Engine(out, bindings, bridge=bridge, monitor=monitor)
     bridge.on_key = engine.ext_key
-    monitor.status_fn = lambda: {"mode": engine.mode_name, "extension": bridge.connected}
+    monitor.status_fn = lambda: {"mode": engine.mode_name, "extension": bridge.connected, "paused": engine.paused}
+    monitor.on_pause = engine.set_paused
     await asyncio.gather(run(engine), bridge.serve(), watch(bindings), monitor.serve())
 
 

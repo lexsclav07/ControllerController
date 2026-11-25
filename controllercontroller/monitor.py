@@ -4,12 +4,16 @@ The daemon listens on a user-only Unix socket ($XDG_RUNTIME_DIR/controllercontro
 newline-delimited JSON to whoever connects: the settings window's "Live input" page and the
 `controllercontroller monitor` command. Nothing here reaches the browser; web pages cannot open it.
 
-  {"t": "hello",  "pad": str|null, "mode": "browser"|"mouse", "extension": bool,
+  {"t": "hello",  "pad": str|null, "mode": "browser"|"mouse", "extension": bool, "paused": bool,
                   "axes": {...}, "down": [button, ...]}                       on connect
-  {"t": "status", "pad": ..., "mode": ..., "extension": bool}                 when any of them changes
+  {"t": "status", "pad": ..., "mode": ..., "extension": bool, "paused": bool} when any of them changes
   {"t": "button", "name": "A", "pressed": bool, "action": "select", "label": "Select / click",
-                  "mode": "browser"|"mouse", "ts": float}                     every press and release
+                  "mode": "browser"|"mouse"|"paused", "ts": float}            every press and release
   {"t": "axes",   "lx", "ly", "rx", "ry": -1..1, "lt", "rt": 0..1}            up to 30 per second
+
+client -> daemon: {"t": "pause", "value": bool}   ignore the pad while true (the buttons above still stream).
+Pausing lasts only as long as the connection, so a window that is closed or crashes never leaves the
+controller dead.
 
 Axes are raw (no deadzone or curve); +y is down, as the kernel reports it.
 """
@@ -45,11 +49,13 @@ class Monitor:
     def __init__(self, path: Path | None = None, interval: float = 1 / 30) -> None:
         self.path = Path(path) if path else socket_path()
         self.interval = interval
-        self.status_fn: Callable[[], dict] = dict   # mode / extension, filled in by the daemon
+        self.status_fn: Callable[[], dict] = dict   # mode / extension / paused, filled in by the daemon
+        self.on_pause: Callable[[bool], None] = lambda _paused: None
         self.pad: str | None = None
         self.axes_state = dict.fromkeys(AXES, 0.0)
         self._down: set[str] = set()
         self._clients: set[asyncio.StreamWriter] = set()
+        self._pausers: set[asyncio.StreamWriter] = set()   # clients that asked for the pad to be ignored
         self._status_sent: dict | None = None
         self._dirty = False
 
@@ -72,7 +78,7 @@ class Monitor:
 
     # -- plumbing
     def _status(self) -> dict:
-        return {"pad": self.pad, "mode": "mouse", "extension": False, **self.status_fn()}
+        return {"pad": self.pad, "mode": "mouse", "extension": False, "paused": False, **self.status_fn()}
 
     def _broadcast(self, msg: dict) -> None:
         if not self._clients:
@@ -84,8 +90,23 @@ class Monitor:
                     raise ConnectionError("client too slow")
                 writer.write(data)
             except Exception:   # closing or stuck: forget it
-                self._clients.discard(writer)
+                self._forget(writer)
                 writer.close()
+
+    def _forget(self, writer: asyncio.StreamWriter) -> None:
+        self._clients.discard(writer)
+        if writer in self._pausers:
+            self._pausers.discard(writer)
+            self.on_pause(bool(self._pausers))
+
+    def _handle(self, writer: asyncio.StreamWriter, line: bytes) -> None:
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            return
+        if isinstance(msg, dict) and msg.get("t") == "pause":
+            (self._pausers.add if msg.get("value") is True else self._pausers.discard)(writer)
+            self.on_pause(bool(self._pausers))
 
     def flush(self) -> None:
         """Send changed axes and status (called ~30 times a second by serve())."""
@@ -102,11 +123,12 @@ class Monitor:
         writer.write((json.dumps(hello, separators=(",", ":")) + "\n").encode())
         self._clients.add(writer)
         try:
-            await reader.read()   # we never expect input; returns at EOF
-        except OSError:
+            while line := await reader.readline():
+                self._handle(writer, line)
+        except (OSError, ValueError):   # reset, or a line far longer than anything we expect
             pass
         finally:
-            self._clients.discard(writer)
+            self._forget(writer)
             writer.close()
 
     async def serve(self) -> None:
@@ -172,11 +194,11 @@ class Dashboard:
         kind = msg.get("t")
         if kind == "hello":
             self.connected = True
-            self.status = {k: msg.get(k) for k in ("pad", "mode", "extension")}
+            self.status = {k: msg.get(k) for k in ("pad", "mode", "extension", "paused")}
             self.axes.update(msg.get("axes", {}))
             self.down = set(msg.get("down", []))
         elif kind == "status":
-            self.status = {k: msg.get(k) for k in ("pad", "mode", "extension")}
+            self.status = {k: msg.get(k) for k in ("pad", "mode", "extension", "paused")}
         elif kind == "axes":
             self.axes.update({k: msg[k] for k in AXES if k in msg})
         elif kind == "button":
@@ -196,6 +218,7 @@ class Dashboard:
             style("ControllerController live input", "1") + style("    Ctrl-C to quit", "2"),
             f"  Controller: {pad}",
             f"  Mode: {s.get('mode', '?')}    Browser extension: {'connected' if s.get('extension') else 'not connected'}",
+            *([style("  Controls paused: presses are shown but do nothing", "33")] if s.get("paused") else []),
             "",
         ]
         for name, kx, ky in (("Left stick ", "lx", "ly"), ("Right stick", "rx", "ry")):
@@ -225,6 +248,8 @@ def cli(argv: list[str]) -> int:
         prog="controllercontroller monitor", description="Live view of the controller as the daemon sees it.")
     parser.add_argument("--json", action="store_true", help="print the raw JSON lines from the daemon")
     parser.add_argument("--log", action="store_true", help="print one line per button press instead of the live screen")
+    parser.add_argument("--pause", action="store_true",
+                        help="make the controller do nothing on the PC while this is running")
     args = parser.parse_args(argv)
     live = sys.stdout.isatty() and not (args.json or args.log)
     dash = Dashboard()
@@ -248,6 +273,8 @@ def cli(argv: list[str]) -> int:
                 continue
             waiting_said = False
             dash.reset()
+            if args.pause:   # lasts only as long as this connection
+                sock.sendall(b'{"t":"pause","value":true}\n')
             _read(sock, dash, args, live)
             sock.close()
     except KeyboardInterrupt:

@@ -111,3 +111,39 @@ def test_monitor_without_a_socket_dir_does_not_crash_the_daemon(tmp_path):
     blocker = tmp_path / "file"
     blocker.write_text("x")
     asyncio.run(Monitor(blocker / "cc.sock").serve())   # logs a warning and returns
+
+
+def test_a_client_can_pause_the_pad_only_while_it_stays_connected(tmp_path):
+    path = tmp_path / "cc.sock"
+    calls = []
+
+    async def scenario():
+        mon = Monitor(path, interval=0.02)
+        mon.on_pause = calls.append
+        task = asyncio.create_task(mon.serve())
+        await asyncio.sleep(0.15)
+        r1, w1 = await asyncio.open_unix_connection(str(path))
+        r2, w2 = await asyncio.open_unix_connection(str(path))
+        w1.write(b'{"t":"pause","value":true}\n'); w2.write(b'{"t":"pause","value":true}\n')
+        w2.write(b"garbage\n")                         # junk is ignored, not fatal
+        await asyncio.sleep(0.1)
+        assert calls[-1] is True
+        w1.close(); await asyncio.sleep(0.1)
+        assert calls[-1] is True                         # the other client still wants it paused
+        w2.write(b'{"t":"pause","value":false}\n'); await asyncio.sleep(0.1)
+        assert calls[-1] is False
+        w2.write(b'{"t":"pause","value":true}\n'); await asyncio.sleep(0.1)
+        assert calls[-1] is True
+        w2.close(); await asyncio.sleep(0.1)             # closing the window (or a crash) un-pauses
+        assert calls[-1] is False
+        task.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_dashboard_says_when_controls_are_paused():
+    d = Dashboard()
+    d.apply({"t": "hello", "pad": "P", "mode": "mouse", "extension": False, "paused": True, "axes": {}, "down": []})
+    assert "Controls paused" in d.render(color=False)
+    d.apply({"t": "status", "pad": "P", "mode": "mouse", "extension": False, "paused": False})
+    assert "Controls paused" not in d.render(color=False)

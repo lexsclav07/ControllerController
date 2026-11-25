@@ -55,6 +55,8 @@ See exactly what the daemon gets from the pad, in the app and in a terminal (han
 - **In the app**: open ControllerController and switch to the **Live input** tab. A drawn controller lights up as you press things, the sticks and triggers move, and the last few presses show the action they ran.
 - **In a terminal**: `controllercontroller monitor` shows a live screen (sticks, triggers, held buttons, recent presses). `controllercontroller monitor --log` prints one line per press instead, and `--json` prints the daemon's raw messages.
 
+**The controller is paused while the ControllerController window is in front**, so testing buttons there never changes your volume or clicks anything; it resumes as soon as you switch to another window or close it. In a terminal, add `--pause` (`controllercontroller monitor --pause`) to pause the pad for as long as the monitor runs.
+
 `controllercontroller` on its own opens the settings window. Both views read a user-only socket at `$XDG_RUNTIME_DIR/controllercontroller.sock`, so they need the daemon running, and web pages cannot reach it. Stick values are raw (before the deadzone), with up as negative.
 
 ## Development

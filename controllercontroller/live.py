@@ -184,6 +184,19 @@ class Feed:
         self._watch = 0
         self._retry = 0
         self._stopped = False
+        self._want_pause = False
+
+    def set_paused(self, value: bool) -> None:
+        """Ask the daemon to ignore the pad (it forgets this when we disconnect)."""
+        self._want_pause = value
+        self._send_pause()
+
+    def _send_pause(self) -> None:
+        if self._sock:
+            try:
+                self._sock.send(json.dumps({"t": "pause", "value": self._want_pause}).encode() + b"\n")
+            except OSError:
+                pass   # the read side notices a dead connection
 
     def start(self) -> None:
         self._retry = 0
@@ -199,6 +212,8 @@ class Feed:
         self._sock, self._buffer = sock, b""
         self._watch = GLib.io_add_watch(sock.fileno(), GLib.PRIORITY_DEFAULT,
                                         GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self._readable)
+        if self._want_pause:
+            self._send_pause()
 
     def stop(self) -> None:
         self._stopped = True
@@ -248,6 +263,9 @@ class LivePage(Gtk.Box):
                          margin_top=12, margin_bottom=18, margin_start=18, margin_end=18)
         self.banner = Adw.Banner(title="The ControllerController daemon isn't running", revealed=True)
         self.status = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, css_classes=["title-4"])
+        note = Gtk.Label(label="While this window is in front the controller doesn't do anything on your PC, "
+                               "so you can press buttons freely.",
+                         wrap=True, justify=Gtk.Justification.CENTER, css_classes=["dim-label"])
         self.view = ControllerView()
         self.readout = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER,
                                  css_classes=["caption", "dim-label", "monospace"])
@@ -255,7 +273,7 @@ class LivePage(Gtk.Box):
         self._rows: deque = deque()
         history = Adw.PreferencesGroup(title="Recent presses")
         history.add(self.recent)
-        for child in (self.banner, self.status, self.view, self.readout, history):
+        for child in (self.banner, self.status, note, self.view, self.readout, history):
             self.append(child)
         self.down: set[str] = set()
         self.pad: str | None = None
@@ -283,7 +301,8 @@ class LivePage(Gtk.Box):
             self.status.set_label("No controller connected")
         else:
             mode = "Browser mode" if msg.get("mode") == "browser" else "Mouse mode"
-            self.status.set_label(f"{pad} · {mode}")
+            paused = " · Controls paused" if msg.get("paused") else ""
+            self.status.set_label(f"{pad} · {mode}{paused}")
 
     def _show_readout(self) -> None:
         a = self.view.axes

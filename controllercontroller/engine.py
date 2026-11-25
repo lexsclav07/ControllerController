@@ -76,6 +76,7 @@ class Engine:
         self.monitor = monitor   # optional live-input feed (monitor.Monitor)
         self.raw = dict.fromkeys(("lx", "ly", "rx", "ry", "lt", "rt"), 0.0)   # un-curved pad state for it
         self.force_mouse = False
+        self.paused = False       # the settings window / monitor asked us to ignore the pad for now
         self.sticks = {"lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0}
         self._frac = {"px": 0.0, "py": 0.0, "sx": 0.0, "sy": 0.0}
         self._held: dict[str, tuple[int, ...]] = {}   # button -> key codes currently held down
@@ -94,16 +95,35 @@ class Engine:
     def mode_name(self) -> str:
         return "browser" if self.browser_mode else "mouse"
 
+    def set_paused(self, value: bool) -> None:
+        """Stop the pad from doing anything (the live view still sees it). Held keys are let go."""
+        if value == self.paused:
+            return
+        self.paused = value
+        log.info("controls %s", "paused" if value else "resumed")
+        if value:
+            for codes in self._held.values():
+                for code in reversed(codes):
+                    self.out.key(code, False)
+            self._held.clear()
+            self._nav.clear()
+            self._nav_dir = None
+        else:   # a stick that is still held when we resume must not fire a fresh nav step
+            self._nav_dir = self._stick_dir()
+            self._nav_next = self._clock + NAV_FIRST_REPEAT
+
     def ext_key(self, name: str) -> None:
         """A key the extension asked for (arrow keys while a video is fullscreen)."""
-        if name in EXT_KEYS:
+        if name in EXT_KEYS and not self.paused:
             self.out.tap(EXT_KEYS[name])
 
     # -- input ---------------------------------------------------------
     def button(self, name: str, pressed: bool) -> None:
         action = self.bindings.get(name, "none")
         if self.monitor:
-            self.monitor.button(name, pressed, action, self.mode_name)
+            self.monitor.button(name, pressed, action, "paused" if self.paused else self.mode_name)
+        if self.paused:
+            return
         if not pressed:
             if self._nav.pop(name, None) is None:
                 for code in reversed(self._held.pop(name, ())):
@@ -217,6 +237,8 @@ class Engine:
     # -- continuous output (call at ~120 Hz) -----------------------------
     def tick(self, dt: float) -> None:
         self._clock += dt
+        if self.paused:
+            return
         s, f = self.sticks, self._frac
         if self.browser_mode:
             self._tick_nav()

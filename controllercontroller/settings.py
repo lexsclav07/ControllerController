@@ -104,7 +104,8 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         page = Adw.PreferencesPage()
         intro = Adw.PreferencesGroup(
-            title="Controls", description="Pick a button to choose what it does. Changes apply immediately.")
+            title="Controls", description="Pick a button to choose what it does. Changes apply immediately. "
+                                          "The controller is paused while this window is in front.")
         page.add(intro)
         for title, buttons in GROUPS:
             group = Adw.PreferencesGroup(title=title)
@@ -130,6 +131,9 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.stack.connect("notify::visible-child-name",
                            lambda *_: reset.set_visible(self.stack.get_visible_child_name() == "controls"))
         self.connect("close-request", lambda *_: self.live.stop() or False)
+        # Presses here must not change your volume or click things: the daemon ignores the pad while
+        # this window is the one you are looking at (and forgets about it if the window goes away).
+        self.connect("notify::is-active", lambda *_: self.live.feed.set_paused(self.is_active()))
         self.live.start()
 
         view.set_content(self.stack)
